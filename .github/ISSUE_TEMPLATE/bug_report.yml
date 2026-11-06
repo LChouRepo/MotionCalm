@@ -1,0 +1,92 @@
+name: Bug report / 问题反馈 / 問題回報
+description: Something doesn't work as expected. 程序表现不符合预期。程式的行為不符合預期。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! You can write in English, 简体中文 or 繁體中文.
+        Before you start, please check that the game runs in **borderless window** or **windowed fullscreen** mode
+        (the mask is not visible over exclusive fullscreen), and see the FAQ in the user guide:
+        [English](https://github.com/LChouRepo/MotionCalm/blob/main/docs/user-guide.en.md) ·
+        [简体中文](https://github.com/LChouRepo/MotionCalm/blob/main/docs/user-guide.zh-CN.md) ·
+        [繁體中文](https://github.com/LChouRepo/MotionCalm/blob/main/docs/user-guide.zh-TW.md).
+        Security problems: please don't file them here; see [SECURITY.md](https://github.com/LChouRepo/MotionCalm/blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: MotionCalm version
+      description: Tray menu → About MotionCalm, e.g. 1.1.0
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: Game name and, if you know it, the .exe name (shown in the debug bar, Ctrl+Alt+F8).
+      placeholder: "e.g. Subnautica (Subnautica.exe)"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: Win + R → winver
+      placeholder: "e.g. Windows 11 23H2 (build 22631)"
+    validations:
+      required: true
+  - type: dropdown
+    id: display_mode
+    attributes:
+      label: Display mode of the game
+      options:
+        - Borderless window / windowed fullscreen
+        - Windowed
+        - Exclusive fullscreen
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: MotionCalm UI language
+      options:
+        - English
+        - 简体中文
+        - 繁體中文
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Setup (optional)
+      description: Number of monitors, resolution / refresh rate, GPU, mouse or controller, game run as administrator?
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What did you do, step by step?
+      placeholder: |
+        1. Start MotionCalm
+        2. Start the game in borderless window mode
+        3. Turn the camera quickly
+    validations:
+      required: true
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: What happened, and what did you expect?
+      description: Screenshots help. Note that the mask is hidden from screenshots while screen motion detection is on — press Ctrl+Alt+F6 to turn it off before taking one.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: MotionCalm.log
+      description: |
+        Tray menu → Open log. Drag the file into this box (or paste the relevant part).
+        The log contains program names such as the game's .exe; remove anything you don't want to share.
+        For more detail, run `MotionCalm.exe --verbose`, reproduce the problem, then attach the log.
+    validations:
+      required: true

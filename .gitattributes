@@ -1,0 +1,10 @@
+# Normalise text, but keep Windows script files CRLF (cmd.exe misparses LF-only batch files)
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.rc  text eol=crlf
+*.ico binary
+*.png binary
+*.zip binary
+*.ini text eol=crlf

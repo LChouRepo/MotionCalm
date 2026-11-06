@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: User guide and FAQ (English)
+    url: https://github.com/LChouRepo/MotionCalm/blob/main/docs/user-guide.en.md
+    about: Setup, calibration, settings, and answers to common questions.
+  - name: 使用说明与常见问题（简体中文）
+    url: https://github.com/LChouRepo/MotionCalm/blob/main/docs/user-guide.zh-CN.md
+    about: 安装、校准、设置说明和常见问题。
+  - name: 使用說明與常見問題（繁體中文）
+    url: https://github.com/LChouRepo/MotionCalm/blob/main/docs/user-guide.zh-TW.md
+    about: 安裝、校準、設定說明和常見問題。
+  - name: Report a security vulnerability
+    url: https://github.com/LChouRepo/MotionCalm/security/advisories/new
+    about: Please report security problems privately, not as a public issue.

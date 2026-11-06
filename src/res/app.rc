@@ -1,0 +1,89 @@
+#pragma code_page(65001)
+// app.rc — MotionCalm.exe 的资源：图标、manifest（RT_MANIFEST 1）、默认 INI 模板（RCDATA）、版本信息、设置窗口的 7 个对话框模板（变更 4）。
+#include <windows.h>
+#include <commctrl.h>
+#include "resource.h"
+
+IDI_APP ICON "icon.ico"
+
+1 RT_MANIFEST "app.manifest"
+
+IDR_DEFAULT_INI RCDATA "MotionCalm.default.ini"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION MC_VERSION_MAJOR,MC_VERSION_MINOR,MC_VERSION_PATCH,MC_VERSION_BUILD
+ PRODUCTVERSION MC_VERSION_MAJOR,MC_VERSION_MINOR,MC_VERSION_PATCH,MC_VERSION_BUILD
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "CompanyName", "MotionCalm"
+            VALUE "FileDescription", "MotionCalm 防晕遮罩"
+            VALUE "FileVersion", MC_VERSION_STR
+            VALUE "InternalName", "MotionCalm"
+            VALUE "LegalCopyright", "MotionCalm"
+            VALUE "OriginalFilename", "MotionCalm.exe"
+            VALUE "ProductName", "MotionCalm"
+            VALUE "ProductVersion", MC_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END
+
+// ---------------------------------------------------------------- 设置窗口（变更 4）
+// 外壳与 6 个分页都是对话框（DS_CONTROL 子页参与外壳的键盘导航）。控件不在模板里：它们由 src/ui 按
+// docs/settings-ui.md 的版式在运行时创建，并按显示器 DPI 以像素排版（8 px 节奏、168 px 标签栏、页内滚动）。
+// 模板只决定窗口样式、标题与字体；尺寸也由代码设定。
+
+IDD_SETTINGS DIALOGEX 0, 0, 400, 360
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+EXSTYLE WS_EX_APPWINDOW | WS_EX_CONTROLPARENT
+CAPTION "MotionCalm 设置"
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x86
+BEGIN
+END
+
+IDD_PAGE_MASK DIALOGEX 0, 0, 380, 300
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x86
+BEGIN
+END
+
+IDD_PAGE_DOTS DIALOGEX 0, 0, 380, 300
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x86
+BEGIN
+END
+
+IDD_PAGE_TRIGGER DIALOGEX 0, 0, 380, 300
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x86
+BEGIN
+END
+
+IDD_PAGE_CALIB DIALOGEX 0, 0, 380, 300
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x86
+BEGIN
+END
+
+IDD_PAGE_HOTKEYS DIALOGEX 0, 0, 380, 300
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x86
+BEGIN
+END
+
+IDD_PAGE_GENERAL DIALOGEX 0, 0, 380, 300
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+FONT 9, "Microsoft YaHei UI", 400, 0, 0x86
+BEGIN
+END

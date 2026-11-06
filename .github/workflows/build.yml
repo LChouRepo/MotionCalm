@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test (release, x64)
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # build.cmd finds Visual Studio with vswhere (scripts\env.cmd), builds the app, the test tools
+      # and tests.exe, runs the unit tests, and exits non-zero if anything fails.
+      # The live verification scripts (scripts\verify*.ps1) take over the screen and are not run here.
+      - name: Build (app + tools + tests)
+        shell: cmd
+        run: call build.cmd all release
+
+      - name: Run unit tests
+        shell: cmd
+        run: out\release\tests.exe
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $h = Get-Content src/res/resource.h -Raw
+          $v = '{0}.{1}.{2}' -f `
+            ([regex]::Match($h, 'MC_VERSION_MAJOR\s+(\d+)').Groups[1].Value), `
+            ([regex]::Match($h, 'MC_VERSION_MINOR\s+(\d+)').Groups[1].Value), `
+            ([regex]::Match($h, 'MC_VERSION_PATCH\s+(\d+)').Groups[1].Value)
+          $version = "$v-dev.$($env:GITHUB_SHA.Substring(0, 7))"
+          ./scripts/package.ps1 -Version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "name=MotionCalm-v$version-win64" >> $env:GITHUB_OUTPUT
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: out/${{ steps.package.outputs.name }}.zip
+          if-no-files-found: error

@@ -1,0 +1,27 @@
+# build outputs
+/out/
+/build/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.res
+*.log
+
+# editors / OS / agent worktrees
+# (.claude/skills and .claude/commands are tracked on purpose: OpenSpec tooling for contributors)
+.vs/
+.vscode/
+*.user
+.claude/worktrees/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# test artifacts
+/test-output/
+
+# user-local config and logs (the shipped template is src/res/MotionCalm.default.ini)
+MotionCalm.ini
+*.zip

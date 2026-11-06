@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and release, e.g. v1.1.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, test and publish
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Build (app + tools + tests)
+        shell: cmd
+        run: call build.cmd all release
+
+      - name: Run unit tests
+        shell: cmd
+        run: out\release\tests.exe
+
+      - name: Check version
+        shell: pwsh
+        run: |
+          $version = $env:TAG -replace '^v', ''
+          $h = Get-Content src/res/resource.h -Raw
+          $src = '{0}.{1}.{2}' -f `
+            ([regex]::Match($h, 'MC_VERSION_MAJOR\s+(\d+)').Groups[1].Value), `
+            ([regex]::Match($h, 'MC_VERSION_MINOR\s+(\d+)').Groups[1].Value), `
+            ([regex]::Match($h, 'MC_VERSION_PATCH\s+(\d+)').Groups[1].Value)
+          if (-not $version.StartsWith($src)) {
+            Write-Error "Tag $env:TAG does not match the version in src/res/resource.h ($src)."
+            exit 1
+          }
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $version = $env:TAG -replace '^v', ''
+          ./scripts/package.ps1 -Version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "zip=out/MotionCalm-v$version-win64.zip" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: MotionCalm ${{ env.TAG }}
+          files: ${{ steps.package.outputs.zip }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          prerelease: ${{ contains(env.TAG, '-') }}
