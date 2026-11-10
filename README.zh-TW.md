@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0
 ```
 
 所有輸出都在 `out\<組態>\`（中繼檔在 `out\<組態>\obj\`）。`build.cmd tools` 會建置測試工具：`fakegame.exe`（假的全螢幕遊戲視窗）、
-`inputsim.exe`（模擬滑鼠移動）、`capturetest.exe`（螢幕擷取效能測試）、`settingsdemo.exe`（用假的宿主開啟設定視窗，用於擷取畫面）。
+`inputsim.exe`（模擬滑鼠移動）、`capturetest.exe`（螢幕擷取效能測試；`--record` / `--replay` 錄製與離線重播網格片段）、`settingsdemo.exe`（用假的宿主開啟設定視窗，用於擷取畫面）。
 實機驗證指令碼請見 [CONTRIBUTING.zh-TW.md](CONTRIBUTING.zh-TW.md)。
 
 ## 目錄結構
@@ -111,7 +111,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0
 | `src/ui/` | 設定視窗及 6 個分頁 |
 | `src/i18n/` | 介面文字表（zh-CN、zh-TW、en） |
 | `src/config/`、`src/util/`、`src/res/` | INI 設定檔、記錄與工具函式、資源與預設 INI |
-| `tests/` | 單元測試（`tests.exe`，內建極簡測試框架） |
+| `tests/` | 單元測試（`tests.exe`，內建極簡測試框架）；`tests/fixtures/README.md` 說明如何錄製與重播螢幕擷取片段 |
 | `tools/` | `fakegame`、`inputsim`、`capturetest`、`settingsdemo`、圖示產生指令碼 |
 | `scripts/` | 建置、打包、實機驗證指令碼 |
 | `openspec/` | OpenSpec 需求規格與已封存的變更 |

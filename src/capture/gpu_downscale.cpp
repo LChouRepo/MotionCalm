@@ -1,48 +1,19 @@
-// gpu_downscale.cpp — GpuDownscaler 的实现：运行时 D3DCompile 的全屏三角形 + 区域平均 PS、3 槽 staging 环与 DO_NOT_WAIT 读回、时间戳查询。
+// gpu_downscale.cpp — GpuDownscaler 的实现：构建时预编译的全屏三角形 + 区域平均 PS（capture/downscale.hlsl）、3 槽 staging 环与 DO_NOT_WAIT 读回、时间戳查询。
 #include "capture/gpu_downscale.h"
-
-#include <d3dcompiler.h>
 
 #include <cstddef>
 #include <cstring>
 #include <format>
 
+// downscale.hlsl 的字节码（scripts\build_shaders.cmd 用 fxc 生成到 %MC_OBJ%\shaders\，const BYTE 数组；需要 <windows.h>，已由 gpu_downscale.h 引入）。
+#include "downscale_ps.h"
+#include "downscale_vs.h"
+
 namespace mc {
-
-const char kDownscaleHlsl[] = R"hlsl(
-// 桌面纹理 -> 每格区域平均的灰度 0.299R + 0.587G + 0.114B（capture-motion-detection design D4）。
-Texture2D<float4> g_src : register(t0);
-SamplerState g_linear : register(s0);
-
-cbuffer Params : register(b0) {
-    float2 g_src_size;   // 源纹理像素尺寸
-    float2 g_cell;       // 每格覆盖的源像素
-    float2 g_step;       // 样本间距（源像素）= cell / taps
-    int2   g_taps;       // 每格每轴的双线性样本数
-};
-
-// 全屏三角形：id 0,1,2 -> (-1,1), (3,1), (-1,-3)，无顶点缓冲。
-float4 VSMain(uint id : SV_VertexID) : SV_Position {
-    float2 p = float2(float((id << 1) & 2), float(id & 2));
-    return float4(p * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
-}
-
-float PSMain(float4 pos : SV_Position) : SV_Target {
-    float2 origin = floor(pos.xy) * g_cell;
-    float acc = 0.0;
-    [loop] for (int j = 0; j < g_taps.y; ++j) {
-        float y = origin.y + (float(j) + 0.5) * g_step.y;
-        [loop] for (int i = 0; i < g_taps.x; ++i) {
-            float2 p = float2(origin.x + (float(i) + 0.5) * g_step.x, y);
-            acc += dot(g_src.SampleLevel(g_linear, p / g_src_size, 0).rgb, float3(0.299, 0.587, 0.114));
-        }
-    }
-    return acc / float(g_taps.x * g_taps.y);
-}
-)hlsl";
 
 namespace {
 
+// 与 capture/downscale.hlsl 的 cbuffer Params 一一对应。
 struct DownscaleConstants {
     float src_w, src_h;
     float cell_w, cell_h;
@@ -50,13 +21,6 @@ struct DownscaleConstants {
     std::int32_t taps_x, taps_y;
 };
 static_assert(sizeof(DownscaleConstants) == 32, "cbuffer layout");
-
-std::string blob_text(ID3DBlob* b) {
-    if (b == nullptr || b->GetBufferSize() == 0) return {};
-    std::string s(static_cast<const char*>(b->GetBufferPointer()), b->GetBufferSize());
-    while (!s.empty() && (s.back() == '\0' || s.back() == '\n' || s.back() == '\r')) s.pop_back();
-    return s;
-}
 
 // SRV 不能用 TYPELESS 格式：换成对应的可采样格式。
 DXGI_FORMAT srv_format(DXGI_FORMAT f) {
@@ -72,38 +36,6 @@ DXGI_FORMAT srv_format(DXGI_FORMAT f) {
 
 }  // namespace
 
-bool GpuDownscaler::compile() {
-    if (vs_blob_ && ps_blob_) return true;
-#ifdef NDEBUG
-    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
-#else
-    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_DEBUG;
-#endif
-    const std::size_t len = std::strlen(kDownscaleHlsl);
-    compile_messages_.clear();
-    struct Stage {
-        const char* entry;
-        const char* target;
-        ComPtr<ID3DBlob>* out;
-    };
-    const Stage stages[] = {{"VSMain", "vs_4_0", &vs_blob_}, {"PSMain", "ps_4_0", &ps_blob_}};
-    for (const Stage& st : stages) {
-        ComPtr<ID3DBlob> code, errors;
-        const HRESULT hr = ::D3DCompile(kDownscaleHlsl, len, "capture_downscale.hlsl", nullptr, nullptr, st.entry,
-                                        st.target, flags, 0, &code, &errors);
-        const std::string msg = blob_text(errors.Get());
-        if (FAILED(hr)) {
-            error_ = std::string("D3DCompile ") + st.entry + " failed: " + msg;
-            vs_blob_.Reset();
-            ps_blob_.Reset();
-            return false;
-        }
-        if (!msg.empty()) compile_messages_ += msg;
-        *st.out = code;
-    }
-    return true;
-}
-
 bool GpuDownscaler::init(ID3D11Device* dev, ID3D11DeviceContext* ctx, bool gpu_timing) {
     release();
     error_.clear();
@@ -113,14 +45,9 @@ bool GpuDownscaler::init(ID3D11Device* dev, ID3D11DeviceContext* ctx, bool gpu_t
     }
     dev_ = dev;
     ctx_ = ctx;
-    if (!compile()) {
-        release();
-        return false;
-    }
-    HRESULT hr = dev_->CreateVertexShader(vs_blob_->GetBufferPointer(), vs_blob_->GetBufferSize(), nullptr, &vs_);
-    if (SUCCEEDED(hr)) {
-        hr = dev_->CreatePixelShader(ps_blob_->GetBufferPointer(), ps_blob_->GetBufferSize(), nullptr, &ps_);
-    }
+    // 字节码是构建时编译进 exe 的静态数组（fxc /WX：有警告就构建失败），这里只在设备上创建着色器。
+    HRESULT hr = dev_->CreateVertexShader(kDownscaleVS, sizeof(kDownscaleVS), nullptr, &vs_);
+    if (SUCCEEDED(hr)) hr = dev_->CreatePixelShader(kDownscalePS, sizeof(kDownscalePS), nullptr, &ps_);
     if (SUCCEEDED(hr)) {
         D3D11_SAMPLER_DESC sd{};
         sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;

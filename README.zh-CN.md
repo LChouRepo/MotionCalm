@@ -93,7 +93,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0
 ```
 
 所有输出在 `out\<配置>\`（中间文件在 `out\<配置>\obj\`）。`build.cmd tools` 构建测试工具：`fakegame.exe`（假的全屏游戏窗口）、
-`inputsim.exe`（模拟鼠标移动）、`capturetest.exe`（截屏性能测试）、`settingsdemo.exe`（用假宿主打开设置窗口，用于截图）。
+`inputsim.exe`（模拟鼠标移动）、`capturetest.exe`（截屏性能测试；`--record` / `--replay` 录制与离线回放网格片段）、`settingsdemo.exe`（用假宿主打开设置窗口，用于截图）。
 实机验证脚本见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)。
 
 ## 目录结构
@@ -111,7 +111,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0
 | `src/ui/` | 设置窗口及 6 个分页 |
 | `src/i18n/` | 界面文字表（zh-CN、zh-TW、en） |
 | `src/config/`、`src/util/`、`src/res/` | INI 配置、日志与工具函数、资源与默认 INI |
-| `tests/` | 单元测试（`tests.exe`，自带极简测试框架） |
+| `tests/` | 单元测试（`tests.exe`，自带极简测试框架）；`tests/fixtures/README.md` 说明如何录制与回放截屏片段 |
 | `tools/` | `fakegame`、`inputsim`、`capturetest`、`settingsdemo`、图标生成脚本 |
 | `scripts/` | 构建、打包、实机验证脚本 |
 | `openspec/` | OpenSpec 需求规格与已归档的变更 |

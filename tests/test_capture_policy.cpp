@@ -1,10 +1,12 @@
-// test_capture_policy.cpp — 截屏采集的纯逻辑：参数收拢、降采样采样布局（1080p 精确盒式平均）、显示器旋转、重建 / 放弃计数、速度过期、capture perf: 行格式。
+// test_capture_policy.cpp — 截屏采集的纯逻辑：参数收拢、降采样采样布局（1080p 精确盒式平均）、显示器旋转、重建 / 放弃计数、速度过期、处理帧限速（60–240 Hz 帧流）、capture perf: 行格式。
 #include "test_framework.h"
 
 #include "capture/capture_policy.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 using namespace mc;
@@ -16,6 +18,45 @@ constexpr std::int32_t kHrUnsupported = static_cast<std::int32_t>(0x887A0004u); 
 
 // 样本 i 的源像素坐标（相对格子原点）：(i + 0.5)·step。
 double tap_pos(const DownscaleLayout& l, int i) { return (i + 0.5) * l.step_x; }
+
+// 确定性的均匀抖动 [-1, 1)（线性同余），让限速测试可重复。
+struct Jitter {
+    std::uint32_t s;
+    double next() {
+        s = s * 1664525u + 1013904223u;
+        return static_cast<double>(s >> 8) / 8388608.0 - 1.0;   // 24 位 → [-1, 1)
+    }
+};
+
+struct StreamStats {
+    int frames = 0;
+    int processed = 0;
+    double min_interval = 1e9;   // 相邻处理帧的间隔（秒）
+    double max_interval = 0;
+    double last_t = -1;
+};
+
+// 向限速器喂 seconds 秒的 hz 帧流（每个时间戳加 ±jitter_s 的均匀抖动），从 t0 开始。
+StreamStats feed(FrameRateLimiter& lim, double hz, double jitter_s, double seconds, double t0 = 100.0,
+                 std::uint32_t seed = 12345u) {
+    StreamStats st;
+    Jitter j{seed};
+    const double p = 1.0 / hz;
+    const int n = static_cast<int>(seconds * hz + 0.5);
+    for (int i = 0; i < n; ++i) {
+        const double t = t0 + i * p + j.next() * jitter_s;
+        ++st.frames;
+        if (lim.on_frame(t)) {
+            ++st.processed;
+            if (st.last_t >= 0) {
+                st.min_interval = std::min(st.min_interval, t - st.last_t);
+                st.max_interval = std::max(st.max_interval, t - st.last_t);
+            }
+            st.last_t = t;
+        }
+    }
+    return st;
+}
 
 }  // namespace
 
@@ -210,6 +251,144 @@ TEST(capture_constants_match_spec) {
     CHECK_NEAR(kSpeedMaxAgeS, 0.25, 1e-12);
     CHECK_EQ(kDiscardFramesAfterBuild, 2);
     CHECK_NEAR(kPerfLogIntervalS, 5.0, 1e-12);
+    CHECK_NEAR(kTargetFrameIntervalS, 0.01375, 1e-12);
+    CHECK_NEAR(FrameRateLimiter{}.target(), kTargetFrameIntervalS, 1e-15);
+}
+
+// ---------------------------------------------------------------- 处理帧限速
+
+TEST(capture_limiter_60_75_100hz_never_decimated) {   // 60 / 75 Hz（以及 90 / 100 Hz）带抖动也一帧不丢
+    {
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 60.0, 0.003, 10.0);   // 每个时间戳 ±3 ms
+        CHECK_EQ(st.frames, 600);
+        CHECK_EQ(st.processed, st.frames);
+    }
+    {
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 75.0, 0.0019, 10.0);  // ±1.9 ms（理论容限约 ±2.08 ms）
+        CHECK_EQ(st.frames, 750);
+        CHECK_EQ(st.processed, st.frames);
+    }
+    {
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 90.0, 0.0005, 5.0);
+        CHECK_EQ(st.processed, st.frames);
+    }
+    {
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 100.0, 0.0003, 5.0);
+        CHECK_EQ(st.processed, st.frames);
+    }
+    {   // 60 fps 的游戏在 144 Hz 显示器上（无 VRR）：帧间隔在 2 / 3 个刷新周期（13.9 / 20.8 ms）之间交替 → 全部处理
+        FrameRateLimiter lim;
+        int processed = 0;
+        for (int i = 0; i < 600; ++i) {
+            if (lim.on_frame(100.0 + std::floor(i * 2.4) / 144.0)) ++processed;
+        }
+        CHECK_EQ(processed, 600);
+    }
+}
+
+TEST(capture_limiter_high_refresh_rates) {
+    const double T = kTargetFrameIntervalS;
+    {   // 120 Hz ±0.25 ms：每隔一帧 → 60 Hz
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 120.0, 0.00025, 2.0);
+        CHECK_EQ(st.frames, 240);
+        CHECK_EQ(st.processed, 120);
+        CHECK(st.min_interval >= 2.0 / 120.0 - 0.0005 - 1e-9);
+        CHECK(st.max_interval <= 2.0 / 120.0 + 0.0005 + 1e-9);
+    }
+    {   // 144 Hz ±0.5 ms → 72 Hz
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 144.0, 0.0005, 2.0);
+        CHECK_EQ(st.frames, 288);
+        CHECK_EQ(st.processed, 144);
+    }
+    {   // 165 Hz ±0.3 ms → 82.5 Hz
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 165.0, 0.0003, 2.0);
+        CHECK_EQ(st.frames, 330);
+        CHECK_EQ(st.processed, 165);
+    }
+    {   // 240 Hz ±0.1 ms：每 3 帧处理 1 帧 → 80 Hz
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 240.0, 0.0001, 2.0);
+        CHECK_EQ(st.frames, 480);
+        CHECK_EQ(st.processed, 160);
+        CHECK(st.min_interval >= 3.0 / 240.0 - 0.0002 - 1e-9);
+        CHECK(st.max_interval <= 3.0 / 240.0 + 0.0002 + 1e-9);
+    }
+    {   // 240 Hz 抖动大到越过边界（±0.4 ms）：在每 3 帧 / 每 4 帧之间切换，处理帧率仍在 60–80 Hz
+        FrameRateLimiter lim;
+        const StreamStats st = feed(lim, 240.0, 0.0004, 2.0);
+        CHECK(st.processed >= 119);
+        CHECK(st.processed <= 161);
+        CHECK(st.min_interval >= 2.0 * T / 3.0 - 1e-9);   // 硬下限：G ≥ target − g/2 且 g ≤ G
+    }
+}
+
+TEST(capture_limiter_rate_sweep_bounds) {   // 51–499 Hz 的均匀帧流：≤ 109 Hz 全部处理；否则处理间隔 ∈ [T − p/2, T + p/2]
+    const double T = kTargetFrameIntervalS;
+    for (int hz = 51; hz < 500; hz += 7) {
+        FrameRateLimiter lim;
+        const double p = 1.0 / hz;
+        const StreamStats st = feed(lim, static_cast<double>(hz), 0.0, 1.0);
+        if (1.5 * p >= T) {
+            CHECK_EQ(st.processed, st.frames);
+        } else {
+            CHECK(st.processed < st.frames);
+            CHECK(st.min_interval >= T - p / 2 - 1e-9);
+            CHECK(st.max_interval <= T + p / 2 + 1e-9);
+            CHECK(st.max_interval <= 4.0 * T / 3.0 + 1e-9);   // 处理帧率不低于约 54.5 Hz（max_shift 的可测速度范围不低于 60 Hz 显示器太多）
+            CHECK(st.min_interval >= 2.0 * T / 3.0 - 1e-9);   // 不高于约 109 Hz
+            CHECK(st.processed >= 54);
+        }
+    }
+}
+
+TEST(capture_limiter_first_frame_and_bad_timestamps) {
+    FrameRateLimiter lim;
+    CHECK_TRUE(lim.on_frame(5.0));      // 首帧
+    CHECK_FALSE(lim.on_frame(5.004));   // 4 ms 后：6 ms < 13.75 ms
+    CHECK_FALSE(lim.on_frame(5.008));
+    CHECK_TRUE(lim.on_frame(5.012));    // 12 + 2 ≥ 13.75
+    // 时间戳为 0 / 负数 / 非有限：照常处理，并且下一帧重新开始
+    CHECK_TRUE(lim.on_frame(0.0));
+    CHECK_TRUE(lim.on_frame(5.014));    // reset 之后的首帧
+    CHECK_FALSE(lim.on_frame(5.016));
+    CHECK_TRUE(lim.on_frame(-1.0));
+    CHECK_TRUE(lim.on_frame(std::numeric_limits<double>::quiet_NaN()));
+    CHECK_TRUE(lim.on_frame(std::numeric_limits<double>::infinity()));
+    CHECK_TRUE(lim.on_frame(5.018));
+    CHECK_FALSE(lim.on_frame(5.020));
+    // 时间戳倒退 / 重复：处理并以它重新锚定（与限速之前的行为相同；估计器自己把 dt ≤ 0 当无效）
+    CHECK_TRUE(lim.on_frame(4.0));
+    CHECK_FALSE(lim.on_frame(4.004));
+    CHECK_TRUE(lim.on_frame(4.004));    // 与上一到达帧相同
+    CHECK_FALSE(lim.on_frame(4.006));
+    // 任意 target：0 → 不限速
+    FrameRateLimiter none(0.0);
+    for (int i = 0; i < 10; ++i) CHECK_TRUE(none.on_frame(1.0 + i * 0.001));
+}
+
+TEST(capture_limiter_resume_after_pause) {
+    FrameRateLimiter lim;
+    StreamStats st = feed(lim, 240.0, 0.0, 1.0, 100.0);
+    CHECK_EQ(st.processed, 80);
+    // 画面停了 3 s（不 reset）：恢复后的第一帧一定处理，随后回到每 3 帧 1 帧
+    st = feed(lim, 240.0, 0.0, 1.0, 104.0);
+    CHECK_EQ(st.processed, 80);
+    // 暂停（reset）后恢复：第一帧处理，即使时间戳离 reset 前的处理帧很近
+    FrameRateLimiter lim2;
+    CHECK_TRUE(lim2.on_frame(10.0));
+    lim2.reset();
+    CHECK_TRUE(lim2.on_frame(10.001));
+    CHECK_FALSE(lim2.on_frame(10.005));
+    // reset 之后时间戳比 reset 之前还早（另一个会话 / 显示器）：照样处理
+    lim2.reset();
+    CHECK_TRUE(lim2.on_frame(9.0));
 }
 
 TEST(capture_speed_freshness) {   // spec：发布时刻早于当前 250 ms 以上 → 主线程用 0
@@ -230,10 +409,11 @@ TEST(capture_perf_line_format) {
     CHECK_EQ(w.speed_avg(), 0.0);
     CHECK_EQ(format_perf_line(w, 0.0),
              std::string("capture perf: frames=0 timeouts=0 lowconf=0 gpu_ms=-1.000 cpu_ms=0.000 cpu_pct=0.00 "
-                         "speed_avg=0.0"));
+                         "speed_avg=0.0 skipped=0"));
     w.frames = 300;
     w.timeouts = 12;
     w.lowconf = 4;
+    w.skipped = 900;   // 240 Hz：每 3 帧处理 1 帧
     w.gpu_ms_sum = 15.0;
     w.gpu_samples = 300;
     w.cpu_ms_sum = 36.0;
@@ -244,11 +424,12 @@ TEST(capture_perf_line_format) {
     CHECK_NEAR(pct, 1.0, 1e-9);
     CHECK_EQ(format_perf_line(w, pct),
              std::string("capture perf: frames=300 timeouts=12 lowconf=4 gpu_ms=0.050 cpu_ms=0.120 cpu_pct=1.00 "
-                         "speed_avg=337.5"));
-    // spec：每行包含 7 个字段，按顺序
+                         "speed_avg=337.5 skipped=900"));
+    // spec：每行包含 7 个字段，按顺序；后加的 skipped 追加在末尾（旧的按前缀 / 字段名解析不受影响）
     const std::string line = format_perf_line(w, pct);
     std::size_t pos = 0;
-    for (const char* key : {"frames=", "timeouts=", "lowconf=", "gpu_ms=", "cpu_ms=", "cpu_pct=", "speed_avg="}) {
+    for (const char* key : {"frames=", "timeouts=", "lowconf=", "gpu_ms=", "cpu_ms=", "cpu_pct=", "speed_avg=",
+                            "skipped="}) {
         const std::size_t at = line.find(key, pos);
         CHECK(at != std::string::npos);
         if (at != std::string::npos) pos = at;
@@ -256,6 +437,7 @@ TEST(capture_perf_line_format) {
     CHECK_EQ(line.rfind("capture perf: ", 0), 0u);
     w.reset(20.0, 2.0);   // 新窗口清零
     CHECK_EQ(w.frames, 0u);
+    CHECK_EQ(w.skipped, 0u);
     CHECK_NEAR(w.start_s, 20.0, 1e-12);
     CHECK_EQ(w.cpu_pct(20.0, 3.0), 0.0);   // 墙钟 0 → 0
     CHECK_EQ(w.cpu_pct(21.0, 1.0), 0.0);   // CPU 时间倒退 → 0

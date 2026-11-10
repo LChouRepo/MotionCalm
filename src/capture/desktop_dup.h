@@ -1,4 +1,4 @@
-// desktop_dup.h — 截屏运动检测服务（openspec capture-motion-detection design D1/D8）：独立截屏线程上做 DXGI 桌面复制 → GPU 降采样 → MotionEstimator（平移）+ SimilarityEstimator（前进 / 倾斜，变更 5）→ SpeedHold，以原子 double 把截屏角速度交给主线程。
+// desktop_dup.h — 截屏运动检测服务（openspec capture-motion-detection design D1/D8）：独立截屏线程上做 DXGI 桌面复制 →（高刷新率时按 FrameRateLimiter 抽帧）GPU 降采样 → MotionEstimator（平移）+ SimilarityEstimator（前进 / 倾斜，变更 5）→ SpeedHold，以原子 double 把截屏角速度交给主线程。
 //
 // 主线程用法（每个 tick，全部非阻塞；只有 stop() 会 join）：
 //   capture_.start(params);                                   // 启动时（--no-capture 时根本不调用）
@@ -15,11 +15,23 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "capture/capture_policy.h"
 
 namespace mc {
+
+// 一个降采样网格：截屏线程读回后、送进估计器之前的那一份（录制 / 回放工具用）。
+struct GridFrame {
+    const float* gray = nullptr;      // grid_w × grid_h 个 float，行主序，纹理（扫描输出）方向；只在回调期间有效
+    int grid_w = 0, grid_h = 0;
+    double frame_time_s = 0;          // 该帧的 DDA LastPresentTime（秒，与 qpc_now_s() 同一基准）
+    int tex_w = 0, tex_h = 0;         // 复制得到的桌面纹理尺寸（扫描输出方向）
+    int screen_w = 0, screen_h = 0;   // 桌面方向的像素尺寸（OutputGeometry）
+    int rotation_deg = 0;             // 0 / 90 / 180 / 270
+};
+using GridSink = std::function<void(const GridFrame&)>;
 
 // 调试条 / capturetest 用的快照（debug() 返回一份拷贝）。dx / dy 为桌面方向的格数（旋转 90° / 270° 时符号不保证）。
 struct CaptureDebug {
@@ -44,11 +56,12 @@ struct CaptureDebug {
     int taps_x = 0, taps_y = 0;
     bool gpu_timing = false;          // 只在日志级别为 debug 时启用
     // start() 以来的累计计数（单调递增；capturetest 做差得到每秒值）
-    std::uint64_t frames = 0;         // 读回并送进估计器的新桌面帧
+    std::uint64_t frames = 0;         // 读回并送进估计器的新桌面帧（限速之后；高刷新率显示器上约 55–109 帧/秒）
     std::uint64_t estimates = 0;      // 其中有前一帧可比的（不含建立后丢弃的帧）
     std::uint64_t lowconf = 0;        // 其中低置信度 / 无纹理的
     std::uint64_t timeouts = 0;       // AcquireNextFrame 超时
     std::uint64_t pointer_only = 0;   // 只有指针更新的帧
+    std::uint64_t skipped = 0;        // 取到但被 FrameRateLimiter 跳过（未降采样、未估计）的新桌面帧
     std::uint64_t dropped = 0;        // staging 环满时丢掉的帧
     std::uint64_t sessions = 0;       // 成功建立的桌面复制会话
     std::uint64_t build_failures = 0; // 建立 / 早夭失败次数
@@ -94,10 +107,17 @@ public:
     CaptureState state() const;
     CaptureDebug debug() const;   // 小结构体拷贝（短暂持锁，仅调试条 / 工具使用）
 
+    // 网格回调（录制工具用；应用本身从不设置）。必须在 start() 之前调用；已启动时调用被忽略（stop() 之后可再设置，
+    // 下次 start() 生效）。回调在截屏线程上运行：每个送进估计器的网格调用一次，按顺序，紧挨在估计之前
+    // （即限速之后，也包括建立 / 重建后只更新参考帧的那几帧）。回调应尽快返回；抛出的异常被捕获并记一行日志，
+    // 之后不再调用该回调。空回调表示没有回调（此时没有额外开销）。
+    void set_grid_sink(GridSink sink);
+
     struct Impl;
 
 private:
     std::unique_ptr<Impl> impl_;
+    GridSink grid_sink_;   // start() 时复制给截屏线程
 };
 
 }  // namespace mc

@@ -233,11 +233,13 @@ Bgra block_texture(int w, int h, int block, std::uint32_t seed, int ox = 0, int 
 
 // ---------------------------------------------------------------- 基本
 
-TEST(capture_downscale_shader_compiles_without_warnings) {
+// 着色器在构建时由 fxc /WX 编译（有警告就构建失败）；这里确认预编译的字节码能在 WARP 设备上创建，管线可用。
+TEST(capture_downscale_shader_init) {
     Rig rig;
     CHECK_TRUE(warp().ok);
     CHECK_TRUE(rig.ok);
-    CHECK_EQ(rig.d.compile_messages(), std::string());
+    CHECK_EQ(rig.d.error(), std::string());
+    CHECK_EQ(rig.d.compile_messages(), std::string());   // 接口保留给 desktop_dup.cpp，恒为空
     CHECK_EQ(rig.d.grid_w(), 160);
     CHECK_EQ(rig.d.grid_h(), 90);
 }

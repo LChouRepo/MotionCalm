@@ -1,18 +1,17 @@
-// renderer.cpp — overlay/renderer 的实现：D3D11 设备 + CreateSwapChainForComposition + DComp 目标 / visual + D3DCompile 着色器 + D2D/DWrite 文字 + GPU 时间戳。
+// renderer.cpp — overlay/renderer 的实现：D3D11 设备 + CreateSwapChainForComposition + DComp 目标 / visual + 构建时预编译的着色器 + D2D/DWrite 文字 + GPU 时间戳。
 #include "overlay/renderer.h"
 
 #include "i18n/i18n.h"
 
-#include <d3dcompiler.h>
-
 #include <algorithm>
 #include <cmath>
-#include <cstring>
-#include <string_view>
 
-#include "overlay/shaders.h"
 #include "util/clock.h"
 #include "util/log.h"
+
+// overlay.hlsl 的字节码（scripts\build_shaders.cmd 用 fxc 生成到 %MC_OBJ%\shaders\，const BYTE 数组；需要 <windows.h>，已由 renderer.h 引入）。
+#include "overlay_ps.h"
+#include "overlay_vs.h"
 
 namespace mc {
 namespace {
@@ -23,13 +22,6 @@ constexpr double kGpuReportS = 5.0;
 
 bool is_device_lost(HRESULT hr) {
     return hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == D2DERR_RECREATE_TARGET;
-}
-
-std::string_view blob_text(ID3DBlob* blob) {
-    if (blob == nullptr || blob->GetBufferSize() == 0) return {};
-    std::string_view s(static_cast<const char*>(blob->GetBufferPointer()), blob->GetBufferSize());
-    while (!s.empty() && (s.back() == '\0' || s.back() == '\n' || s.back() == '\r')) s.remove_suffix(1);
-    return s;
 }
 
 D2D1_COLOR_F color(float r, float g, float b, float a) { return D2D1_COLOR_F{r, g, b, a}; }
@@ -44,7 +36,7 @@ bool Renderer::init(HWND hwnd, UINT width, UINT height, bool gpu_timing) {
     width_ = std::max<UINT>(1, width);
     height_ = std::max<UINT>(1, height);
     gpu_timing_ = gpu_timing;
-    if (!create_device() || !compile_shaders() || !create_pipeline() || !create_swap_chain(hwnd)) {
+    if (!create_device() || !create_pipeline() || !create_swap_chain(hwnd)) {
         shutdown();
         return false;
     }
@@ -140,43 +132,10 @@ bool Renderer::create_device() {
     return true;
 }
 
-bool Renderer::compile_shaders() {
-    if (vs_blob_ && ps_blob_) return true;   // 设备重建时复用
-#ifdef NDEBUG
-    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
-#else
-    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-    const std::size_t len = std::strlen(shaders::kOverlayHlsl);
-    struct Stage {
-        const char* entry;
-        const char* target;
-        ComPtr<ID3DBlob>* out;
-    };
-    const Stage stages[] = {{"VSMain", "vs_4_0", &vs_blob_}, {"PSMain", "ps_4_0", &ps_blob_}};
-    for (const Stage& st : stages) {
-        ComPtr<ID3DBlob> code, errors;
-        const HRESULT hr = ::D3DCompile(shaders::kOverlayHlsl, len, "overlay.hlsl", nullptr, nullptr, st.entry,
-                                        st.target, flags, 0, &code, &errors);
-        const std::string_view msg = blob_text(errors.Get());
-        if (FAILED(hr)) {
-            log::warn("D3DCompile {} ({}) failed hr=0x{:08X}: {}", st.entry, st.target, static_cast<unsigned>(hr),
-                      msg);
-            return false;
-        }
-        if (!msg.empty()) log::warn("D3DCompile {} ({}) warnings: {}", st.entry, st.target, msg);
-        *st.out = code;
-    }
-    log::debug("shaders compiled: vs={} bytes ps={} bytes, no errors/warnings", vs_blob_->GetBufferSize(),
-               ps_blob_->GetBufferSize());
-    return true;
-}
-
 bool Renderer::create_pipeline() {
-    HRESULT hr = device_->CreateVertexShader(vs_blob_->GetBufferPointer(), vs_blob_->GetBufferSize(), nullptr, &vs_);
-    if (SUCCEEDED(hr)) {
-        hr = device_->CreatePixelShader(ps_blob_->GetBufferPointer(), ps_blob_->GetBufferSize(), nullptr, &ps_);
-    }
+    // 着色器字节码是构建时编译进 exe 的静态数组：每次 init（包括设备丢失后的重建）直接在新设备上创建。
+    HRESULT hr = device_->CreateVertexShader(kOverlayVS, sizeof(kOverlayVS), nullptr, &vs_);
+    if (SUCCEEDED(hr)) hr = device_->CreatePixelShader(kOverlayPS, sizeof(kOverlayPS), nullptr, &ps_);
     if (SUCCEEDED(hr)) {
         D3D11_BUFFER_DESC bd{};
         bd.ByteWidth = sizeof(OverlayConstants);

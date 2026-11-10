@@ -1,9 +1,8 @@
-// test_overlay.cpp — overlay 外观：make_params 的几何 / DPI / toast 数值，以及用 WARP 设备离屏渲染真实 HLSL（overlay/shaders.h）后读回像素，核对 overlay-rendering spec 的数值场景。
+// test_overlay.cpp — overlay 外观：make_params 的几何 / DPI / toast 数值，以及用 WARP 设备离屏渲染真实着色器（overlay/overlay.hlsl 构建时编译出的、app 也在用的字节码）后读回像素，核对 overlay-rendering spec 的数值场景。
 #include "test_framework.h"
 
 #include <windows.h>
 #include <d3d11.h>
-#include <d3dcompiler.h>
 
 #include <algorithm>
 #include <cmath>
@@ -13,14 +12,17 @@
 
 #include "config/config.h"
 #include "overlay/overlay.h"
-#include "overlay/shaders.h"
 #include "util/win.h"
+
+// overlay.hlsl 的字节码：与 renderer.cpp 引用的是同一份 scripts\build_shaders.cmd 输出（%MC_OBJ%\shaders\）。
+#include "overlay_ps.h"
+#include "overlay_vs.h"
 
 using namespace mc;
 
 namespace {
 
-// 离屏渲染器：WARP 设备 + 与 app 相同的 HLSL，渲染到 B8G8R8A8 纹理再读回（预乘 BGRA，每像素一个 uint32）。
+// 离屏渲染器：WARP 设备 + 与 app 相同的着色器字节码，渲染到 B8G8R8A8 纹理再读回（预乘 BGRA，每像素一个 uint32）。
 struct Offscreen {
     ComPtr<ID3D11Device> dev;
     ComPtr<ID3D11DeviceContext> ctx;
@@ -29,29 +31,14 @@ struct Offscreen {
     ComPtr<ID3D11Buffer> cb;
     ComPtr<ID3D11RasterizerState> rs;
     bool ok = false;
-    std::string compile_messages;
 
     Offscreen() {
         if (FAILED(::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                                        nullptr, 0, D3D11_SDK_VERSION, &dev, nullptr, &ctx))) {
             return;
         }
-        ComPtr<ID3DBlob> vsb, psb, err;
-        const std::size_t len = std::strlen(shaders::kOverlayHlsl);
-        const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
-        if (FAILED(::D3DCompile(shaders::kOverlayHlsl, len, "overlay.hlsl", nullptr, nullptr, "VSMain", "vs_4_0",
-                                flags, 0, &vsb, &err))) {
-            return;
-        }
-        if (err) compile_messages.append(static_cast<const char*>(err->GetBufferPointer()), err->GetBufferSize());
-        err.Reset();
-        if (FAILED(::D3DCompile(shaders::kOverlayHlsl, len, "overlay.hlsl", nullptr, nullptr, "PSMain", "ps_4_0",
-                                flags, 0, &psb, &err))) {
-            return;
-        }
-        if (err) compile_messages.append(static_cast<const char*>(err->GetBufferPointer()), err->GetBufferSize());
-        if (FAILED(dev->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &vs))) return;
-        if (FAILED(dev->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &ps))) return;
+        if (FAILED(dev->CreateVertexShader(kOverlayVS, sizeof(kOverlayVS), nullptr, &vs))) return;
+        if (FAILED(dev->CreatePixelShader(kOverlayPS, sizeof(kOverlayPS), nullptr, &ps))) return;
         D3D11_BUFFER_DESC bd{};
         bd.ByteWidth = sizeof(OverlayConstants);
         bd.Usage = D3D11_USAGE_DEFAULT;
@@ -205,9 +192,11 @@ TEST(overlay_toast_opacity_timeline) {
 
 // ---------------------------------------------------------------- 真实 HLSL（WARP 离屏渲染）
 
-TEST(overlay_shader_compiles_without_warnings) {
+// 着色器在构建时由 fxc /WX 编译（有警告就构建失败）；这里确认字节码是 DXBC 容器，并且能在设备上创建。
+TEST(overlay_shader_bytecode_creates) {
+    CHECK_TRUE(std::memcmp(kOverlayVS, "DXBC", 4) == 0);
+    CHECK_TRUE(std::memcmp(kOverlayPS, "DXBC", 4) == 0);
     CHECK_TRUE(gpu().ok);
-    CHECK_EQ(gpu().compile_messages, std::string());
 }
 
 TEST(overlay_shader_zero_intensity_fully_transparent) {

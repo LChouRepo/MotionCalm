@@ -124,7 +124,7 @@ powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0
 
 Everything goes to `out\<config>\` (objects in `out\<config>\obj\`). The test tools are built with
 `build.cmd tools`: `fakegame.exe` (fake full-screen game window), `inputsim.exe` (synthetic mouse
-movement), `capturetest.exe` (screen-capture benchmark) and `settingsdemo.exe` (settings window with a
+movement), `capturetest.exe` (screen-capture benchmark; `--record` / `--replay` save and replay grid clips offline) and `settingsdemo.exe` (settings window with a
 fake host, for screenshots). Live verification scripts are described in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -143,7 +143,7 @@ fake host, for screenshots). Live verification scripts are described in
 | `src/ui/` | Settings window and its six pages |
 | `src/i18n/` | UI string tables (zh-CN, zh-TW, en) |
 | `src/config/`, `src/util/`, `src/res/` | INI configuration, logging and helpers, resources and default INI |
-| `tests/` | Unit tests (`tests.exe`, built-in micro test framework) |
+| `tests/` | Unit tests (`tests.exe`, built-in micro test framework); `tests/fixtures/README.md` explains recording and replaying capture clips |
 | `tools/` | `fakegame`, `inputsim`, `capturetest`, `settingsdemo`, icon generator |
 | `scripts/` | Build scripts, packaging, live verification scripts |
 | `openspec/` | OpenSpec specs and archived changes |

@@ -1,4 +1,4 @@
-// capture_policy.h — 截屏采集的纯逻辑（不含 Win32 / D3D，可单元测试）：状态与参数、降采样采样布局、显示器旋转、重建 / 放弃策略、速度过期、性能统计行。
+// capture_policy.h — 截屏采集的纯逻辑（不含 Win32 / D3D，可单元测试）：状态与参数、降采样采样布局、显示器旋转、重建 / 放弃策略、速度过期、处理帧限速、性能统计行。
 #pragma once
 
 #include <cstdint>
@@ -48,11 +48,41 @@ inline constexpr double kReleaseAfterPauseS = 5.0;      // 暂停这么久后释
 inline constexpr double kSpeedMaxAgeS = 0.25;           // 发布值超过这么久没刷新 → 主线程按 0 处理
 inline constexpr int kDiscardFramesAfterBuild = 2;      // 建立 / 重建后前 2 帧只更新参考帧
 inline constexpr double kPerfLogIntervalS = 5.0;        // capture perf: 行的间隔
+inline constexpr double kTargetFrameIntervalS = 0.01375;   // 处理帧的目标间隔（FrameRateLimiter，高刷新率显示器上抽帧）
 
 // 发布于 published_s 的速度在 now_s 时是否仍可用（≤ 250 ms）。两者同为 qpc_now_s() 基准。
 inline bool speed_is_fresh(double published_s, double now_s) {
     return now_s - published_s <= kSpeedMaxAgeS;
 }
+
+// ---------------------------------------------------------------- 处理帧限速（高刷新率显示器）
+
+// 决定一个新桌面帧（只看非指针更新的帧，按其 DDA LastPresentTime）是否送去降采样 + 估计；不处理的帧取到后直接释放。
+// 规则（"离目标间隔最近的那一帧"）：G = 本帧距上一处理帧的时间，g = 本帧距上一到达帧的时间；
+//   G + g/2 ≥ target → 处理。即本帧比 target 早到的量不大于"等下一帧（约 g 之后）会晚到的量"时就处理本帧。
+// 对周期 p 的均匀帧流：1.5·p ≥ target（target 13.75 ms 时 p ≥ 9.17 ms，即 ≤ 109 Hz）时每帧都处理；
+//   否则处理间隔 = n·p ∈ [target − p/2, target + p/2)，处理帧率在 55–109 Hz 之间：
+//   60 / 75 / 90 / 100 Hz → 全部；120 → 60；144 → 72；165 → 82.5；170 → 85；180 → 90；200 → 66.7；240 → 80；360 → 72。
+// 13.75 ms 的取法：100 Hz（1.5·p = 15 ms）与 120 Hz（单帧 12.5 ms）之间居中，两边各留 1.25 ms 抖动余量；
+//   60 / 75 Hz 每个时间戳可容忍约 ±3.7 / ±2.0 ms 抖动而不丢帧。抖动越过边界时只是在相邻两种抽帧比之间切换（dt 来自时间戳，估计不受影响）。
+// 首帧、时间戳非有限或 ≤ 0、时间戳不递增（≤ 上一到达帧）时一律处理并以本帧重新锚定（与限速之前的行为相同）。
+// 会话建立 / 关闭、暂停后恢复时调用 reset()。纯逻辑，非线程安全。
+class FrameRateLimiter {
+public:
+    explicit FrameRateLimiter(double target_interval_s = kTargetFrameIntervalS) : target_(target_interval_s) {}
+
+    // 一个新桌面帧到达（t_s = 呈现时刻，秒）：true → 处理；false → 跳过（直接 ReleaseFrame）。
+    bool on_frame(double t_s);
+    // 忘掉历史：下一帧视为首帧。
+    void reset() { has_last_ = false; }
+    double target() const { return target_; }
+
+private:
+    double target_;
+    double last_processed_ = 0;   // 上一处理帧的时间
+    double last_seen_ = 0;        // 上一到达帧（含跳过的帧）的时间
+    bool has_last_ = false;
+};
 
 // ---------------------------------------------------------------- 降采样布局（design D4）
 
@@ -117,6 +147,7 @@ struct PerfWindow {
     std::uint64_t frames = 0;        // 读回并估计的新桌面帧
     std::uint64_t timeouts = 0;      // AcquireNextFrame 超时
     std::uint64_t lowconf = 0;       // 有前一帧可比、但低置信度 / 无纹理的估计
+    std::uint64_t skipped = 0;       // 取到但被 FrameRateLimiter 跳过（未处理）的新桌面帧
     double gpu_ms_sum = 0;           // 降采样 GPU 耗时（时间戳查询）
     std::uint64_t gpu_samples = 0;
     double cpu_ms_sum = 0;           // 每帧读回 + 估计的 CPU 耗时
@@ -131,8 +162,9 @@ struct PerfWindow {
     double cpu_pct(double now_s, double thread_cpu_s) const;
 };
 
-// "capture perf: frames=<n> timeouts=<n> lowconf=<n> gpu_ms=<x.xxx> cpu_ms=<x.xxx> cpu_pct=<x.xx> speed_avg=<x.x>"
-// （spec「截屏性能日志」；GPU 计时不可用时 gpu_ms=-1.000）。
+// "capture perf: frames=<n> timeouts=<n> lowconf=<n> gpu_ms=<x.xxx> cpu_ms=<x.xxx> cpu_pct=<x.xx> speed_avg=<x.x> skipped=<n>"
+// （spec「截屏性能日志」；GPU 计时不可用时 gpu_ms=-1.000）。skipped 为后加字段，追加在末尾以保持旧解析方式可用；
+// frames 只数处理过的帧，所以高刷新率显示器上 frames 约为 5 s × 处理帧率，frames + skipped 才是取到的新帧数。
 std::string format_perf_line(const PerfWindow& w, double cpu_pct);
 
 }  // namespace mc
