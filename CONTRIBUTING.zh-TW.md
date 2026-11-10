@@ -45,6 +45,10 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_calibration.ps1 # 遊戲
 其他工具：`capturetest.exe`（螢幕擷取與估計器耗時）、`fakegame.exe --selfcheck`（不開視窗的估計器自我檢查）、
 `settingsdemo.exe --lang <zh-CN|zh-TW|en> --advanced --screenshots test-output\i18n\<語言>`（用假的宿主擷取設定視窗的每一頁）。
 
+要用真實遊戲畫面調整螢幕擷取估計器：先用 `capturetest.exe --seconds 15 --record tests\fixtures\recordings\<名稱>.mcgrid` 錄一段片段，
+再用 `capturetest.exe --replay <片段> [--csv OUT]` 離線重播，或把 `MC_REPLAY_DIR` 設為片段所在的資料夾後執行 `tests.exe replay_local`，
+詳見 [tests/fixtures/README.md](tests/fixtures/README.md)。錄製檔是商業遊戲的畫面，**絕對不要提交**（`*.mcgrid` 與 `tests/fixtures/recordings/` 已列在 `.gitignore`）。
+
 ## OpenSpec 工作流程
 
 程式行為用 [OpenSpec](https://github.com/Fission-AI/OpenSpec) 描述。規格與變更文件以簡體中文撰寫（見 `openspec/config.yaml`），

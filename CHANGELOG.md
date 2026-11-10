@@ -13,12 +13,39 @@ The design notes behind each release are in [`openspec/changes/archive/`](opensp
   guides, security policy, issue and pull request templates.
 - GitHub Actions: build and unit tests on every push and pull request; release workflow that packages
   the zip and attaches it to the GitHub Release for `v*` tags.
+- Offline recording and replay of screen motion detection: `capturetest --record PATH` saves the
+  grayscale grids fed to the estimators as a versioned binary clip (`*.mcgrid`), and
+  `capturetest --replay PATH [--csv OUT]` runs a clip through `GridPipeline`, a pure-logic mirror of
+  the capture thread's estimation path, without capturing the screen. An optional `<clip>.expect` file
+  holds bounds on the replay summary. New unit tests for the clip format and replay (synthetic clips;
+  local clips from the `MC_REPLAY_DIR` environment variable); see `tests/fixtures/README.md`.
+  Recordings are git-ignored and never committed.
+- `CaptureService::set_grid_sink()`: a capture-thread callback that receives every grid fed to the
+  estimators (used by tools only; the app never sets it).
 
 ### Changed
+- **Capture frame-rate limit** (OpenSpec change `capture-frame-rate-limit`): on high-refresh-rate
+  monitors the capture thread still acquires every desktop frame but only downscales and estimates
+  the one closest to a 13.75 ms interval (by the DDA present timestamps); the others are released
+  unprocessed. 60 / 75 / 90 / 100 Hz are not decimated; 120 / 144 / 165 / 240 Hz are processed at
+  60 / 72 / 82.5 / 80 frames per second. The `capture perf:` debug line gains a trailing
+  `skipped=<n>` field, and `frames=` now counts processed frames only.
+- Release and debug builds link the C runtime statically (`/MT`, `/MTd`), so the `.exe` files no
+  longer need the Visual C++ Redistributable.
+- HLSL shaders are compiled at build time by `scripts/build_shaders.cmd` (`fxc.exe` from the Windows
+  SDK, warnings as errors) and embedded as byte arrays; there is no `D3DCompile` at run time and
+  `d3dcompiler.lib` is no longer linked.
 - End-user guides moved to `docs/user-guide.{zh-CN,zh-TW,en}.md`. The release zip now contains
   `LICENSE` and the guides as `USER-GUIDE.zh-CN.md`, `USER-GUIDE.zh-TW.md` and `USER-GUIDE.en.md`.
 - `scripts/env.cmd` finds Visual Studio with `vswhere.exe` (any edition with the x64 C++ tools);
   `MC_VS_PATH` (install folder) and `MC_VCVARS` (path of `vcvars64.bat`) remain as overrides.
+
+### Fixed
+- Screen motion detection no longer reports a huge pan speed on strictly periodic textures (floor
+  tiles, fences, grids). The projection correlation has several equally high peaks there, one per
+  texture period, and the estimator used to take whichever was marginally highest (for example
+  574 °/s for a real 34 °/s pan). It now picks the peak closest to the previous valid shift, or the
+  smallest shift when there is none. Non-periodic scenes have a single peak and are unaffected.
 
 ## [1.1.0] - 2026-11-06
 

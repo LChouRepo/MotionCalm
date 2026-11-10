@@ -51,6 +51,12 @@ Other tools: `capturetest.exe` (capture and estimator timing), `fakegame.exe --s
 (estimator self-check without a window), and `settingsdemo.exe --lang <zh-CN|zh-TW|en> --advanced
 --screenshots test-output\i18n\<lang>` (screenshots of every settings page with a fake host).
 
+To tune the capture estimators on real game footage, record a clip with
+`capturetest.exe --seconds 15 --record tests\fixtures\recordings\<name>.mcgrid` and replay it offline with
+`capturetest.exe --replay <clip> [--csv OUT]`, or set `MC_REPLAY_DIR` to the folder and run
+`tests.exe replay_local`; see [tests/fixtures/README.md](tests/fixtures/README.md). Never commit recordings:
+they are frames of commercial games (`*.mcgrid` and `tests/fixtures/recordings/` are git-ignored).
+
 ## OpenSpec workflow
 
 Behaviour is specified with [OpenSpec](https://github.com/Fission-AI/OpenSpec). Specs and change

@@ -71,6 +71,7 @@ MotionCalm/
     build_app.cmd            # 编 MotionCalm.exe（变更 1 负责）
     build_tools.cmd          # 编 tools/*（测试工具代理负责）
     build_tests.cmd          # 编并运行 tests.exe
+    build_shaders.cmd        # fxc 把 *.hlsl 编成字节码头文件（%MC_OBJ%\shaders\），由上面三个脚本先调用
     verify.ps1               # 集成验证：起假游戏 → 模拟鼠标 → 截图 → 读日志
   src/
     app/        main.cpp, app.h/.cpp          # 装配、消息循环、tick、命令行参数、单实例
@@ -81,12 +82,17 @@ MotionCalm/
     model/      intensity.h/.cpp              # 纯逻辑：输入 → 目标强度 → 平滑强度（可单元测试）
     overlay/    overlay.h/.cpp                # 窗口、显示器跟随、置顶维持、WDA_EXCLUDEFROMCAPTURE
                 renderer.h/.cpp               # D3D11 + DComp + 全屏 PS（遮罩 + 点）+ D2D/DWrite 文字层
-                shaders.h                     # HLSL 以字符串嵌入，运行时 D3DCompile
+                overlay.hlsl                  # 遮罩 + 点的着色器，构建时由 fxc 编译（运行时不编译）
     tray/       tray.h/.cpp                   # Shell_NotifyIcon、右键菜单、toast 请求
                 hotkeys.h/.cpp                # RegisterHotKey 管理、字符串 ⇄ 组合键、冲突检测
     calib/      calibration.h/.cpp            # 变更 2
-    capture/    desktop_dup.h/.cpp            # 变更 3：DDA 采集 + GPU 降采样
+    capture/    desktop_dup.h/.cpp            # 变更 3：DDA 采集、截屏线程（CaptureService）
+                gpu_downscale.h/.cpp, downscale.hlsl   # 变更 3：GPU 降采样（着色器同样构建时编译）
+                capture_policy.h/.cpp         # 纯逻辑：参数、降采样布局、重建策略、处理帧限速、性能统计行
                 motion_estimator.h/.cpp       # 变更 3：纯逻辑：两帧投影 → (dx, dy, 置信度)
+                similarity_estimator.h/.cpp   # 变更 5：纯逻辑：相似变换 → 前进 / 倾斜
+                grid_recording.h/.cpp         # 灰度网格片段文件（*.mcgrid）读写，离线回放用
+                grid_pipeline.h/.cpp          # 纯逻辑：截屏线程估计路径的离线复刻（GridPipeline）
     ui/         settings_dlg.h/.cpp, pages/*  # 变更 4
     util/       log.h/.cpp, strings.h, win.h（ComPtr、RAII 小工具）
     i18n/       i18n.h/.cpp, strings.h, strings_{zh_cn,zh_tw,en}.cpp   # 变更 6：界面文字表（简体 / 繁體 / English）
@@ -98,7 +104,9 @@ MotionCalm/
   tests/
     test_main.cpp            # 自带的极简测试框架（无第三方）
     test_intensity.cpp, test_ini.cpp, test_hotkey_parse.cpp, test_game_rules.cpp,
-    test_calibration.cpp（变更 2）, test_motion_estimator.cpp（变更 3）
+    test_calibration.cpp（变更 2）, test_motion_estimator.cpp（变更 3）,
+    test_capture_policy.cpp, test_grid_recording.cpp, test_replay.cpp（片段格式与离线回放）, …
+    fixtures/README.md       # 怎么录制 / 回放真实游戏片段（录制文件不入库）
   openspec/                  # OpenSpec 变更与规格
   docs/       user-guide.{zh-CN,zh-TW,en}.md（面向玩家的使用说明）、settings-ui.md、images/
   DESIGN.md  README*.md（项目主页：英文 / 简体 / 繁體）
@@ -392,6 +400,11 @@ MotionCalm v1.0 —— 状态行（灰）："游戏：cs2.exe · 已锁定 · �
 
 - **采集**：`IDXGIOutput1::DuplicateOutput` 对 overlay 所在显示器；工作线程 `AcquireNextFrame(16 ms)`；超时 → 帧未变 → 速度衰减为 0。
   显示器切换、`DXGI_ERROR_ACCESS_LOST`（全屏切换 / UAC）→ 重建，重建失败则 2 s 后重试；连续失败则在日志里说明并关闭该功能。
+- **处理帧限速**（`FrameRateLimiter`，`capture_policy.h`）：每个桌面帧照样取到，但新的（非只有指针更新的）帧只有在
+  `G + g/2 ≥ kTargetFrameIntervalS`（13.75 ms）时才降采样 + 估计，`G` = 距上一处理帧、`g` = 距上一到达帧，均按 DDA `LastPresentTime`
+  （即"离目标间隔最近的那一帧"）；否则直接释放（参考帧不变，下一处理帧的 dt 按时间戳覆盖这段，发布值照常刷新，计入 `skipped`）。
+  60 / 75 / 90 / 100 Hz 不抽帧；120 / 144 / 165 / 240 Hz 处理 60 / 72 / 82.5 / 80 帧/秒；处理帧率总在约 55–109 帧/秒之间。
+  首帧、时间戳无效或不递增时一律处理；会话建立 / 关闭、暂停后恢复时重置。理由与边界推导见 `capture_policy.h` 与 OpenSpec 变更 `capture-frame-rate-limit`。
 - **降采样**：GPU：把桌面纹理以线性采样渲染到 `grid_w × grid_h`（默认 160×90）的 `R32_FLOAT` 灰度 RT（三步双线性或 3×3 taps），`CopyResource` 到 staging，`Map` 读回 CPU（57 KB）。
 - **位移估计**（`MotionEstimator`，纯逻辑、可单测）：
   - 列投影 `C[x] = Σ_y I(x,y)`，行投影 `R[y] = Σ_x I(x,y)`，各自去均值、去线性趋势。
@@ -400,8 +413,14 @@ MotionCalm v1.0 —— 状态行（灰）："游戏：cs2.exe · 已锁定 · �
   - 像素 → 角度：`deg = shift_px_screen × assumed_hfov_deg / W`（默认 HFOV 90°）；`capture_deg_per_s = deg / dt_frame`。
 - **接入**：主线程 tick 读取原子值放进 `IntensityInputs.capture_deg_per_s`，门控 `gate_capture`；阈值同鼠标，按 `capture_sensitivity` 再乘保守系数（低 ×2.0、中 ×1.5、高 ×1.0）。
 - **自截屏问题**：截屏检测开启时强制 `set_capture_excluded(true)`（`hide_from_capture=auto`）。
-- **性能**：记录并在 `--verbose` 日志里每 5 s 打印平均 GPU/CPU 每帧耗时；目标 GPU < 0.2 ms、CPU < 2%。
+- **性能**：记录并在 `--verbose` 日志里每 5 s 打印平均 GPU/CPU 每帧耗时（"每帧"指每个处理帧；`capture perf:` 行的 `frames=` 只数处理帧，
+  末尾的 `skipped=<n>` 是被限速跳过的帧）；目标 GPU < 0.2 ms、CPU < 2%。
 - 单元测试：合成 160×90 纹理帧（随机纹理 + 已知位移、加噪、亮度整体突变、完全换图），验证 dx/dy 误差 < 0.5 格、闪光不触发、换图置信度低。
+- **离线回放**：`CaptureService::set_grid_sink` 把送进估计器的每个网格交给回调（只有工具使用），`capturetest --record` 据此录成
+  `*.mcgrid` 片段（格式见 `grid_recording.h`），`capturetest --replay` 与 `tests.exe` 用 `GridPipeline`（`grid_pipeline.h`）离线重跑。
+  `GridPipeline` 复刻 `CaptureService::Impl` 的估计部分（参数、几何换算、建立后丢帧、估计器、`SpeedHold`、发布），**改动其一必须同步改另一边**。
+  有意的差异（详见 `grid_pipeline.h`）：发布时刻取帧自己的时间戳；网格尺寸取自片段；整段视为一个会话；限速、只有指针更新的帧与丢帧
+  都发生在网格产生之前，片段里已是这些步骤之后的帧序列，回放不再复刻。录制文件是商业游戏画面，**永不入库**（见 `tests/fixtures/README.md`）。
 
 ## 12. 变更 4：设置窗口
 
@@ -415,8 +434,11 @@ MotionCalm v1.0 —— 状态行（灰）："游戏：cs2.exe · 已锁定 · �
 
 ## 13. 构建、规范、测试
 
-- **编译参数**（`scripts/env.cmd`）：`cl /nologo /std:c++20 /EHsc /W4 /WX- /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /permissive- /Zc:__cplusplus`；release 加 `/O2 /GL /DNDEBUG`，debug 加 `/Od /Zi /MDd`。
-  链接：`user32 gdi32 shell32 ole32 advapi32 comctl32 dwmapi d3d11 dxgi dcomp d2d1 dwrite d3dcompiler xinput9_1_0 shcore`。
+- **编译参数**（`scripts/env.cmd`）：`cl /nologo /std:c++20 /EHsc /W4 /WX- /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /permissive- /Zc:__cplusplus`；release 加 `/O2 /GL /DNDEBUG /MT`，debug 加 `/Od /Zi /FS /MTd`。
+  静态 C 运行库（`/MT`、`/MTd`）是为了兑现"单个 exe、无依赖"：exe 不需要 Visual C++ 运行库（vcruntime140.dll 等）。
+  链接：`user32 gdi32 shell32 ole32 advapi32 comctl32 dwmapi d3d11 dxgi dcomp d2d1 dwrite xinput9_1_0 shcore winmm uuid dxguid`（不再有 `d3dcompiler`）。
+  着色器（`*.hlsl`）在构建时由 `scripts/build_shaders.cmd` 调 Windows SDK 的 `fxc.exe` 编成字节码头文件（`/WX`：着色器警告即构建失败）：
+  启动更快、不依赖 d3dcompiler_47.dll、着色器错误在构建时就暴露，运行时不再 `D3DCompile`。
   app 用 `/SUBSYSTEM:WINDOWS`，tools 与 tests 用 `/SUBSYSTEM:CONSOLE`。资源：`rc` 编译 `app.rc`（图标、manifest、版本信息、变更 4 的对话框）。
   输出到 `out\<debug|release>\`。
 - **代码规范**：C++20，`Microsoft::WRL::ComPtr`，RAII，不用异常传递业务错误（初始化失败返回 bool + 日志），`std::wstring` 处理 Win32 字符串，源码 UTF-8（`/utf-8`），中文字符串用 `L"…"`。文件头一行注释说明职责。
