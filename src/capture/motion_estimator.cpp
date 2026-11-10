@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <initializer_list>
 #include <utility>
 
@@ -90,6 +91,8 @@ void MotionEstimator::reset() {
     has_prev_ = false;
     prev_t_ = 0;
     for (Axis* a : {&col_, &row_}) {
+        a->last_shift = 0;
+        a->last_ok = false;
         a->prev_energy = a->cur_energy = 0;
         a->prev_textured = a->cur_textured = false;
     }
@@ -139,8 +142,7 @@ MotionEstimator::AxisResult MotionEstimator::estimate_axis(Axis& a) {
         rho[s + S] = v;
     }
 
-    // 峰值；完全并列时取 |s| 较小者（按 0, −1, +1, −2, +2 … 的顺序找严格更大的值）。
-    // 注意：严格周期的纹理（网格、地砖）会有多个 ρ ≈ 1 的混叠峰，这里不做歧义检测，可能锁到错误的混叠位移。
+    // 全局最高峰；完全并列时取 |s| 较小者（按 0, −1, +1, −2, +2 … 的顺序找严格更大的值）。
     int best = 0;
     double best_rho = rho[S];
     for (int k = 1; k <= S; ++k) {
@@ -153,6 +155,29 @@ MotionEstimator::AxisResult MotionEstimator::estimate_axis(Axis& a) {
             best = k;
         }
     }
+
+    // 混叠峰消歧：严格周期的纹理（网格、地砖、栅栏）在 s ≡ 真实位移 (mod 周期) 处都有 ρ ≈ 1 的峰，哪个最高只取决于
+    // 重叠段长短带来的微小差别，直接取最高峰会锁到离谱的大位移。所以把 ρ ≥ 最高峰 − kAliasPeakTolerance 的局部极大值
+    // 都当作候选，取离先验最近的那个：先验 = 上一次有效估计的位移（运动是连续的），没有则为 0（最小位移）。
+    // 非周期画面只有一个候选（就是最高峰），结果与不消歧时完全相同。
+    const double prior = a.last_ok ? a.last_shift : 0.0;
+    const double floor_rho = best_rho - kAliasPeakTolerance;
+    int pick = best;
+    double pick_dist = std::fabs(best - prior);
+    for (int s = -S; s <= S; ++s) {
+        const double v = rho[s + S];
+        if (v < floor_rho || s == best) continue;
+        const bool left_ok = s == -S || v > rho[s - 1 + S];
+        const bool right_ok = s == S || v >= rho[s + 1 + S];
+        if (!left_ok || !right_ok) continue;   // 不是局部极大值（只是最高峰的肩部）
+        const double d = std::fabs(s - prior);
+        if (d < pick_dist || (d == pick_dist && std::abs(s) < std::abs(pick))) {
+            pick = s;
+            pick_dist = d;
+        }
+    }
+    best = pick;
+    best_rho = rho[best + S];
 
     // 抛物线亚格插值（峰在 ±S 边界时不插值：真实位移可能在范围外）。
     double shift = best;
@@ -190,6 +215,12 @@ MotionEstimate MotionEstimator::push(const float* gray, double timestamp_s) {
         e.confidence = std::min(rx.confidence, ry.confidence);
         const bool textured = col_.cur_textured && col_.prev_textured && row_.cur_textured && row_.prev_textured;
         e.valid = textured && e.confidence >= params_.min_correlation;
+        // 消歧的先验只取有效估计；无效（换场、闪光、低置信度）之后从"最小位移"重新开始。
+        col_.last_shift = rx.shift;
+        row_.last_shift = ry.shift;
+        col_.last_ok = row_.last_ok = e.valid;
+    } else {
+        col_.last_ok = row_.last_ok = false;
     }
 
     commit_axis(col_);

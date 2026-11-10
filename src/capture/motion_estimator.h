@@ -24,6 +24,7 @@ struct MotionEstimate {
 };
 
 // 全局平移估计：列 / 行投影 → 去均值 + 去线性趋势 → 与上一帧投影在重叠段上做皮尔逊相关 → 峰值 + 抛物线亚格插值。
+// 周期纹理（地砖、栅栏）会有多个几乎一样高的混叠峰：这时取离"上一次有效位移"最近的峰（没有则取 |s| 最小的），见 kAliasPeakTolerance。
 // 每帧 O(W·H + (W+H)·S)，构造（或 configure）之后 push() 不再分配堆内存。非线程安全。
 class MotionEstimator {
 public:
@@ -50,6 +51,8 @@ private:
         std::vector<double> rho;       // ρ(s)，下标 s + S
         double cur_energy = 0, prev_energy = 0;   // Σ P̂²
         bool cur_textured = false, prev_textured = false;
+        double last_shift = 0;         // 上一次有效估计的位移（混叠峰消歧的先验）
+        bool last_ok = false;          // last_shift 是否可用（上一帧的估计有效）
     };
     struct AxisResult {
         double shift = 0;
@@ -79,6 +82,8 @@ double shift_to_deg(double dx_cells, double dy_cells, int grid_w, int grid_h, in
 // 同上再除以两帧图像的呈现时间差 dt（秒），得到截屏角速度（°/s）。
 // dt ≤ 0、dt > kMaxFrameIntervalS（0.25 s）、非有限值或任一尺寸 ≤ 0 → "无效"（nullopt）：后一帧只作参考帧，不产生速度。
 inline constexpr double kMaxFrameIntervalS = 0.25;
+// 混叠峰消歧：ρ 不低于最高峰这么多的局部极大值都算候选峰（非周期画面的次峰远低于此，只有一个候选，行为不变）。
+inline constexpr double kAliasPeakTolerance = 0.05;
 std::optional<double> shift_to_deg_per_s(double dx_cells, double dy_cells, int grid_w, int grid_h, int screen_w_px,
                                          int screen_h_px, double assumed_hfov_deg, double dt_s);
 
