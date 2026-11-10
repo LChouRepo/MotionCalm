@@ -1,4 +1,4 @@
-// desktop_dup.cpp — CaptureService 的实现：显示器 → 适配器 / 输出匹配、截屏线程自己的 D3D11 设备、DuplicateOutput(1)、取帧循环、暂停 / 释放、失败恢复、性能日志。
+// desktop_dup.cpp — CaptureService 的实现：显示器 → 适配器 / 输出匹配、截屏线程自己的 D3D11 设备、DuplicateOutput(1)、取帧循环（高刷新率抽帧）、暂停 / 释放、失败恢复、性能日志、网格回调。
 #include "capture/desktop_dup.h"
 
 #include <d3d11.h>
@@ -8,6 +8,7 @@
 #include <atomic>
 #include <iterator>
 #include <cmath>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -194,6 +195,8 @@ struct CaptureService::Impl {
     SpeedHold hold;
     SpeedHold zoom_hold, roll_hold;   // 变更 5
     RebuildPolicy policy;
+    FrameRateLimiter limiter;   // 高刷新率显示器上只处理约每 13.75 ms 一帧
+    GridSink sink;              // start() 时从 CaptureService 复制；空 = 无
     PerfWindow perf;
     CaptureParams cur;
     bool configured = false;
@@ -224,6 +227,7 @@ struct CaptureService::Impl {
     void step();
     void release_frame();
     void drain();
+    void emit_grid(double frame_t);
     void perf_tick(double now);
     void log_first_grid();
 };
@@ -349,6 +353,7 @@ void CaptureService::Impl::enter_idle(CaptureState s, double now) {
         down.drop_pending();
         estimator.reset();   // 恢复取帧后的第一帧只作参考帧
         similarity.reset();
+        limiter.reset();     // 恢复取帧后的第一帧一定处理
     }
     reset_holds();
     set_state(s, now);
@@ -361,6 +366,7 @@ void CaptureService::Impl::close_session(const char* reason) {
     session.close();
     estimator.reset();
     similarity.reset();
+    limiter.reset();
     if (was_open && reason != nullptr) log::info("capture released ({})", reason);
 }
 
@@ -389,6 +395,7 @@ bool CaptureService::Impl::open_session(HMONITOR mon) {
     discard = kDiscardFramesAfterBuild;
     estimator.reset();
     similarity.reset();
+    limiter.reset();
     first_grid_logged = false;
     tex_w = static_cast<int>(session.desc.ModeDesc.Width);
     tex_h = static_cast<int>(session.desc.ModeDesc.Height);
@@ -487,6 +494,7 @@ void CaptureService::Impl::drain() {
         }
         if (r != GpuDownscaler::Read::Ready) break;
         if (!first_grid_logged) log_first_grid();
+        if (sink) emit_grid(ft);   // 录制工具：与估计器看到的完全相同的网格
         MotionEstimate e = estimator.push(gray.data(), ft);
         // 变更 5：相似变换估计（纹理方向的网格；平移提示 = 投影互相关的结果，交换坐标轴之前）
         const double s0 = qpc_now_s();
@@ -529,6 +537,28 @@ void CaptureService::Impl::drain() {
         local.cpu_ms_sum += ms;
     }
     local.dropped = down.dropped();
+}
+
+void CaptureService::Impl::emit_grid(double frame_t) {
+    GridFrame g;
+    g.gray = gray.data();
+    g.grid_w = cur.grid_w;
+    g.grid_h = cur.grid_h;
+    g.frame_time_s = frame_t;
+    g.tex_w = tex_w;
+    g.tex_h = tex_h;
+    g.screen_w = geom.screen_w;
+    g.screen_h = geom.screen_h;
+    g.rotation_deg = session.rotation_deg;
+    try {
+        sink(g);
+    } catch (const std::exception& ex) {
+        log::warn("capture grid sink threw ({}); sink disabled", ex.what());
+        sink = nullptr;
+    } catch (...) {
+        log::warn("capture grid sink threw; sink disabled");
+        sink = nullptr;
+    }
 }
 
 void CaptureService::Impl::perf_tick(double now) {
@@ -576,6 +606,18 @@ void CaptureService::Impl::step() {
         perf_tick(now);
         return;
     }
+    const double frame_t = static_cast<double>(fi.LastPresentTime.QuadPart) / qpc_frequency();
+    if (!limiter.on_frame(frame_t)) {
+        // 高刷新率：离上一处理帧太近，不降采样也不估计（参考帧不变，下一处理帧的 dt 按时间戳覆盖这段）。
+        res.Reset();
+        release_frame();
+        ++local.skipped;
+        ++perf.skipped;
+        drain();   // 上一处理帧的读回仍在这里及时完成
+        publish(hold.value(now), now);
+        perf_tick(now);
+        return;
+    }
     ComPtr<ID3D11Texture2D> tex;
     hr = res.As(&tex);
     if (SUCCEEDED(hr)) {
@@ -590,7 +632,6 @@ void CaptureService::Impl::step() {
             local.taps_x = l.taps_x;
             local.taps_y = l.taps_y;
         }
-        const double frame_t = static_cast<double>(fi.LastPresentTime.QuadPart) / qpc_frequency();
         const double s0 = qpc_now_s();
         hr = down.submit(tex.Get(), frame_t);   // Draw → CopyResource(staging) → Flush
         local.submit_ms_sum += (qpc_now_s() - s0) * 1000.0;
@@ -710,6 +751,7 @@ bool CaptureService::start(const CaptureParams& params) {
     auto impl = std::make_unique<Impl>();
     impl->params = sanitize_capture_params(params);
     impl->params_gen.store(1, std::memory_order_release);
+    impl->sink = grid_sink_;   // 线程创建之前写入，std::thread 的构造保证截屏线程看得到
     impl->event.reset(::CreateEventW(nullptr, FALSE, FALSE, nullptr));
     if (!impl->event) {
         log::warn("capture: CreateEvent failed err={}", ::GetLastError());
@@ -736,6 +778,14 @@ void CaptureService::stop() {
 }
 
 bool CaptureService::started() const { return impl_ != nullptr; }
+
+void CaptureService::set_grid_sink(GridSink sink) {
+    if (impl_) {
+        log::debug("capture: set_grid_sink after start() ignored");
+        return;
+    }
+    grid_sink_ = std::move(sink);
+}
 
 void CaptureService::set_target(HMONITOR mon, bool feature_on, bool wanted) {
     if (!impl_) return;

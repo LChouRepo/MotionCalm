@@ -78,6 +78,27 @@ bool RebuildPolicy::on_failure(std::int32_t hr) {
     return count_ >= kMaxConsecutiveFailures;
 }
 
+bool FrameRateLimiter::on_frame(double t_s) {
+    if (!std::isfinite(t_s) || t_s <= 0) {   // 时间戳不可用：不限速，下一帧重新开始
+        has_last_ = false;
+        return true;
+    }
+    if (!has_last_ || t_s <= last_seen_) {   // 首帧 / 时间戳不递增：处理并重新锚定
+        has_last_ = true;
+        last_processed_ = t_s;
+        last_seen_ = t_s;
+        return true;
+    }
+    const double since_processed = t_s - last_processed_;
+    const double gap = t_s - last_seen_;
+    last_seen_ = t_s;
+    if (since_processed + 0.5 * gap >= target_) {
+        last_processed_ = t_s;
+        return true;
+    }
+    return false;
+}
+
 void PerfWindow::reset(double now_s, double thread_cpu_s) {
     *this = PerfWindow{};
     start_s = now_s;
@@ -92,8 +113,9 @@ double PerfWindow::cpu_pct(double now_s, double thread_cpu_s) const {
 
 std::string format_perf_line(const PerfWindow& w, double cpu_pct) {
     return std::format("capture perf: frames={} timeouts={} lowconf={} gpu_ms={:.3f} cpu_ms={:.3f} cpu_pct={:.2f} "
-                       "speed_avg={:.1f}",
-                       w.frames, w.timeouts, w.lowconf, w.gpu_ms_avg(), w.cpu_ms_avg(), cpu_pct, w.speed_avg());
+                       "speed_avg={:.1f} skipped={}",
+                       w.frames, w.timeouts, w.lowconf, w.gpu_ms_avg(), w.cpu_ms_avg(), cpu_pct, w.speed_avg(),
+                       w.skipped);
 }
 
 }  // namespace mc

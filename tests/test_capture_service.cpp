@@ -1,4 +1,4 @@
-// test_capture_service.cpp — CaptureService 线程生命周期（不取任何屏幕：目标显示器为空或不存在）：Off / Paused / Recovering 状态、发布值为 0、参数收拢、stop 及时返回、关 → 开清零失败计数；周期计数 CPU 时钟；app 侧的调试条截屏字段与 --no-capture 参数。
+// test_capture_service.cpp — CaptureService 线程生命周期（不取任何屏幕：目标显示器为空或不存在）：Off / Paused / Recovering 状态、发布值为 0、参数收拢、stop 及时返回、关 → 开清零失败计数、网格回调的设置时机；周期计数 CPU 时钟；app 侧的调试条截屏字段与 --no-capture 参数。
 #include "test_framework.h"
 
 #include <windows.h>
@@ -110,6 +110,28 @@ TEST(capture_service_params_sanitized_and_applied) {
     p.grid_w = 192;
     s.update_params(p);
     CHECK_TRUE(wait_until([&] { return s.debug().grid_w == 192; }));
+    s.stop();
+}
+
+TEST(capture_service_grid_sink_set_before_start) {
+    // 网格回调：start() 之前设置；没有取到帧时从不调用；start() 之后的设置被忽略；计数从 0 开始。
+    CaptureService s;
+    int calls = 0;
+    s.set_grid_sink([&calls](const GridFrame& g) {
+        if (g.gray != nullptr && g.grid_w > 0) ++calls;
+    });
+    CHECK_TRUE(s.start(CaptureParams{}));
+    s.set_grid_sink(GridSink{});   // 已启动：忽略（不影响截屏线程手里的那份）
+    s.set_target(nullptr, true, true);
+    CHECK_TRUE(wait_until([&] { return s.state() == CaptureState::Paused; }));
+    const CaptureDebug d = s.debug();
+    CHECK_EQ(d.frames, 0u);
+    CHECK_EQ(d.skipped, 0u);
+    s.stop();
+    CHECK_EQ(calls, 0);
+    // stop() 之后可以清掉 / 重新设置（下次 start() 生效）
+    s.set_grid_sink(nullptr);
+    CHECK_TRUE(s.start(CaptureParams{}));
     s.stop();
 }
 
