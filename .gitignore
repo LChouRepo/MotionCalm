@@ -22,6 +22,12 @@ Desktop.ini
 # test artifacts
 /test-output/
 
+# capture grid recordings (capturetest --record): frames of commercial games, never committed
+# (local clips go in tests/fixtures/recordings/, see tests/fixtures/README.md)
+/tests/fixtures/recordings/
+*.mcgrid
+*.mcgrid.tmp
+
 # user-local config and logs (the shipped template is src/res/MotionCalm.default.ini)
 MotionCalm.ini
 *.zip
