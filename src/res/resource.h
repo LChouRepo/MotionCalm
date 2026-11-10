@@ -6,11 +6,11 @@
 #define IDR_DEFAULT_INI  201   /* RCDATA：MotionCalm.default.ini 模板（UTF-8 BOM + CRLF） */
 
 #define MC_VERSION_MAJOR 1
-#define MC_VERSION_MINOR 1
+#define MC_VERSION_MINOR 2
 #define MC_VERSION_PATCH 0
 #define MC_VERSION_BUILD 0
-#define MC_VERSION_STR       "1.1.0.0"   /* VERSIONINFO 的 FileVersion / ProductVersion */
-#define MC_VERSION_SHORT_STR "1.1"       /* 菜单标题、关于框："MotionCalm v1.1" */
+#define MC_VERSION_STR       "1.2.0.0"   /* VERSIONINFO 的 FileVersion / ProductVersion */
+#define MC_VERSION_SHORT_STR "1.2"       /* 菜单标题、关于框："MotionCalm v1.2" */
 
 /* ---------------------------------------------------------------- 设置窗口（变更 4 settings-window）
    对话框模板用 300–306（与 RCDATA 201 错开，避免看起来像同一个 ID）。

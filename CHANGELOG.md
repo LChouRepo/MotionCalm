@@ -8,6 +8,8 @@ The design notes behind each release are in [`openspec/changes/archive/`](opensp
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-10
+
 ### Added
 - Public repository layout: English / Simplified Chinese / Traditional Chinese READMEs, contributing
   guides, security policy, issue and pull request templates.
@@ -91,5 +93,6 @@ First release.
   hotkey capture boxes with conflict detection, restore defaults.
 - Simplified Chinese end-user guide; unit tests (`tests.exe`) and live verification scripts.
 
-[Unreleased]: https://github.com/LChouRepo/MotionCalm/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/LChouRepo/MotionCalm/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/LChouRepo/MotionCalm/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/LChouRepo/MotionCalm/releases/tag/v1.1.0

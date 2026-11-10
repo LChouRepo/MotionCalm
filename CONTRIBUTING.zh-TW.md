@@ -22,7 +22,7 @@
 build.cmd all release        :: app + 工具 + 測試；tests.exe 自動執行
 build.cmd tests debug        :: 目標：all | app | tools | tests；組態：debug | release
 out\release\tests.exe        :: 只執行單元測試；失敗時結束代碼非 0
-powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0   :: 發行套件，輸出到 out\
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.2.0   :: 發行套件，輸出到 out\
 ```
 
 輸出在 `out\<組態>\`，中繼檔在 `out\<組態>\obj\`，不會寫入原始碼資料夾。CI 在每次 push 和 Pull Request 時執行的就是這些單元測試。

@@ -23,7 +23,7 @@ Run these from a normal `cmd` prompt in the repository root (a Developer Command
 build.cmd all release        :: app + tools + tests; tests.exe runs automatically
 build.cmd tests debug        :: targets: all | app | tools | tests; configs: debug | release
 out\release\tests.exe        :: unit tests only; non-zero exit code on failure
-powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0   :: release zip in out\
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.2.0   :: release zip in out\
 ```
 
 Output goes to `out\<config>\`, objects to `out\<config>\obj\`; nothing is written into the source tree.

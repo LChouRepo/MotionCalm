@@ -9,12 +9,12 @@
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\package.ps1
-  powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.0.1
+  powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.2.0
 #>
 [CmdletBinding()]
 param(
     [ValidatePattern('^[0-9A-Za-z][0-9A-Za-z.\-]*$')]
-    [string]$Version = '1.1.0',
+    [string]$Version = '1.2.0',
     [ValidateSet('debug', 'release')]
     [string]$Config = 'release'
 )

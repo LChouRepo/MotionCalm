@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!-- app.manifest: embedded by app.rc as RT_MANIFEST 1 (link uses /MANIFEST:NO). -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="MotionCalm" version="1.0.0.0" processorArchitecture="amd64"/>
+  <assemblyIdentity type="win32" name="MotionCalm" version="1.2.0.0" processorArchitecture="amd64"/>
   <description>MotionCalm</description>
   <dependency>
     <dependentAssembly>

@@ -89,7 +89,7 @@ build.cmd app debug          :: 目标：all | app | tools | tests；配置：de
 out\release\tests.exe        :: 再跑一次单元测试
 
 :: 发布包 -> out\MotionCalm-v<版本>-win64.zip
-powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.2.0
 ```
 
 所有输出在 `out\<配置>\`（中间文件在 `out\<配置>\obj\`）。`build.cmd tools` 构建测试工具：`fakegame.exe`（假的全屏游戏窗口）、

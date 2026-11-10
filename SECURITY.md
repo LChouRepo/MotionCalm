@@ -7,8 +7,8 @@ Only the latest release receives fixes. Please update to the
 
 | Version | Supported |
 |---|---|
-| 1.1.x (latest) | Yes |
-| < 1.1 | No |
+| 1.2.x (latest) | Yes |
+| < 1.2 | No |
 
 ## What MotionCalm does and doesn't do
 

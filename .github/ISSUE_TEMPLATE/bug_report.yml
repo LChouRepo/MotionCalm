@@ -16,8 +16,8 @@ body:
     id: version
     attributes:
       label: MotionCalm version
-      description: Tray menu → About MotionCalm, e.g. 1.1.0
-      placeholder: "1.1.0"
+      description: Tray menu → About MotionCalm, e.g. 1.2.0
+      placeholder: "1.2.0"
     validations:
       required: true
   - type: input

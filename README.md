@@ -119,7 +119,7 @@ build.cmd app debug          :: targets: all | app | tools | tests; configs: deb
 out\release\tests.exe        :: run the unit tests again
 
 :: release zip -> out\MotionCalm-v<version>-win64.zip
-powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.1.0
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1 -Version 1.2.0
 ```
 
 Everything goes to `out\<config>\` (objects in `out\<config>\obj\`). The test tools are built with
