@@ -84,17 +84,20 @@ rem ---------------------------------------------------------------- flags
 :flags
 set "MC_CFLAGS=/nologo /std:c++20 /EHsc /W4 /WX- /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /permissive- /Zc:__cplusplus"
 if "%MC_CONFIG%"=="debug" goto :flags_debug
-set "MC_CFLAGS=%MC_CFLAGS% /O2 /GL /DNDEBUG /MD"
+rem /MT, /MTd: static C runtime, so the .exe files need no VC++ redistributable (vcruntime140.dll,
+rem msvcp140.dll, ...). Every target is one self-contained .exe (no project DLLs), so no CRT boundary.
+set "MC_CFLAGS=%MC_CFLAGS% /O2 /GL /DNDEBUG /MT"
 set "MC_LDFLAGS=/NOLOGO /LTCG /OPT:REF /OPT:ICF"
 goto :flags_done
 :flags_debug
 rem /FS: several cl invocations (and /MP workers) may share one .pdb.
-set "MC_CFLAGS=%MC_CFLAGS% /Od /Zi /FS /MDd"
+set "MC_CFLAGS=%MC_CFLAGS% /Od /Zi /FS /MTd"
 set "MC_LDFLAGS=/NOLOGO /DEBUG"
 :flags_done
 
 rem DESIGN.md section 13 list, plus winmm (timeBeginPeriod), uuid/dxguid (IID_* symbols).
-set "MC_LIBS=user32.lib gdi32.lib shell32.lib ole32.lib advapi32.lib comctl32.lib dwmapi.lib d3d11.lib dxgi.lib dcomp.lib d2d1.lib dwrite.lib d3dcompiler.lib xinput9_1_0.lib shcore.lib winmm.lib uuid.lib dxguid.lib"
+rem No d3dcompiler.lib: shaders are compiled at build time by scripts\build_shaders.cmd (fxc).
+set "MC_LIBS=user32.lib gdi32.lib shell32.lib ole32.lib advapi32.lib comctl32.lib dwmapi.lib d3d11.lib dxgi.lib dcomp.lib d2d1.lib dwrite.lib xinput9_1_0.lib shcore.lib winmm.lib uuid.lib dxguid.lib"
 
 rem ---------------------------------------------------------------- dirs
 set "MC_OUT=%MC_ROOT%\out\%MC_CONFIG%"

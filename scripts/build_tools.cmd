@@ -7,10 +7,19 @@ rem   tools\capturetest\main.cpp + src\capture\*.cpp + src\util\log.cpp -> captu
 rem   tools\settingsdemo\main.cpp + src\**\*.cpp except src\app\ + src\res\app.rc -> settingsdemo.exe
 rem       (console; the real settings window driven by a fake SettingsHost; + gdiplus.lib for PNG screenshots)
 rem Uses %MC_CONFIG% (debug|release, default release). Can be run standalone or from build.cmd.
+rem capturetest and settingsdemo compile src\capture\gpu_downscale.cpp (and settingsdemo also
+rem src\overlay\renderer.cpp), which include the fxc headers: build_shaders.cmd runs first and those
+rem two get /I"%MC_OBJ%\shaders". fakegame and inputsim do not need the shaders.
 rem Keep this file ASCII-only.
 setlocal EnableExtensions
 call "%~dp0env.cmd"
 if errorlevel 1 exit /b 1
+call "%~dp0build_shaders.cmd"
+if errorlevel 1 (
+  echo [tools] FAILED
+  exit /b 1
+)
+set "MC_SHINC=/I"%MC_OBJ%\shaders""
 
 set "MC_TOOLS_FAIL=0"
 call :build_one fakegame "%MC_ROOT%\src\capture\motion_estimator.cpp" "%MC_ROOT%\src\capture\similarity_estimator.cpp"
@@ -86,7 +95,7 @@ set "MC_CRSP=%MC_TOBJ%\_cl.rsp"
 for %%F in ("%MC_ROOT%\src\capture\*.cpp") do >>"%MC_CRSP%" echo "%%~fF"
 >>"%MC_CRSP%" echo "%MC_ROOT%\src\util\log.cpp"
 echo [tools] cl   %MC_NAME%
-cl %MC_CFLAGS% /I"%MC_ROOT%\src" /MP /c /Fo"%MC_TOBJ%\\" /Fd"%MC_TOBJ%\vc.pdb" @"%MC_CRSP%"
+cl %MC_CFLAGS% /I"%MC_ROOT%\src" %MC_SHINC% /MP /c /Fo"%MC_TOBJ%\\" /Fd"%MC_TOBJ%\vc.pdb" @"%MC_CRSP%"
 if errorlevel 1 (
   echo [tools] compile failed: %MC_NAME%
   exit /b 1
@@ -168,7 +177,7 @@ for %%F in ("%MC_DIR%\*.cpp") do (
 if "!MC_N!"=="0" exit /b 0
 if not exist "%MC_ODIR%\" mkdir "%MC_ODIR%"
 echo [tools] cl   %MC_NAME%: %~2 (!MC_N! files)
-cl %MC_CFLAGS% /I"%MC_ROOT%\src" /MP /c /Fo"%MC_ODIR%\\" /Fd"%MC_TOBJ%\vc.pdb" @"%MC_RSP%"
+cl %MC_CFLAGS% /I"%MC_ROOT%\src" %MC_SHINC% /MP /c /Fo"%MC_ODIR%\\" /Fd"%MC_TOBJ%\vc.pdb" @"%MC_RSP%"
 if errorlevel 1 (
   echo [tools] compile failed: %MC_NAME% in %MC_DIR%
   exit /b 1

@@ -12,8 +12,8 @@
 
 namespace mc {
 
-// 降采样着色器源码（VSMain：SV_VertexID 全屏三角形；PSMain：区域平均灰度）。供测试检查编译结果。
-extern const char kDownscaleHlsl[];
+// 降采样着色器在 capture/downscale.hlsl（VSMain：SV_VertexID 全屏三角形；PSMain：区域平均灰度），
+// 构建时由 scripts\build_shaders.cmd 用 fxc 编译成字节码数组，只有 gpu_downscale.cpp 引用。
 
 // 只在创建它的线程上使用（截屏线程有自己的 D3D11 设备，见 design D2）。非线程安全。
 class GpuDownscaler {
@@ -26,11 +26,11 @@ public:
     GpuDownscaler& operator=(const GpuDownscaler&) = delete;
 
     // 在 dev 上创建着色器、采样器、常量缓冲、光栅化状态；gpu_timing 为真时再建时间戳查询（失败只是关掉计时）。
-    // 着色器字节码在 release() 后保留，下次 init 不再编译。失败返回 false，原因在 error()。
+    // 着色器用构建时预编译的字节码创建。失败返回 false，原因在 error()。
     bool init(ID3D11Device* dev, ID3D11DeviceContext* ctx, bool gpu_timing);
     // （重新）创建 grid_w×grid_h 的渲染目标与 staging 环；丢弃未读回的槽。
     bool set_grid(int grid_w, int grid_h);
-    // 释放所有设备对象（保留编译好的字节码）。
+    // 释放所有设备对象。
     void release();
 
     bool ready() const { return rtv_ != nullptr; }
@@ -39,7 +39,8 @@ public:
     bool gpu_timing() const { return timing_; }
     const DownscaleLayout& layout() const { return layout_; }
     const std::string& error() const { return error_; }
-    // 着色器编译的警告文本（正常为空）。
+    // 着色器编译的警告文本。着色器在构建时由 fxc /WX 编译（有警告就构建失败），所以恒为空；
+    // 保留这个接口是为了调用方（desktop_dup.cpp）不必改。
     const std::string& compile_messages() const { return compile_messages_; }
 
     // 把 src（整张纹理）降采样到渲染目标，复制进下一个空闲 staging 槽并 Flush；frame_time_s 随槽保存。
@@ -74,13 +75,11 @@ private:
         bool in_flight = false;
     };
 
-    bool compile();
     HRESULT ensure_source_copy(const D3D11_TEXTURE2D_DESC& d);
     int oldest_pending() const;
 
     ComPtr<ID3D11Device> dev_;
     ComPtr<ID3D11DeviceContext> ctx_;
-    ComPtr<ID3DBlob> vs_blob_, ps_blob_;
     ComPtr<ID3D11VertexShader> vs_;
     ComPtr<ID3D11PixelShader> ps_;
     ComPtr<ID3D11SamplerState> sampler_;
@@ -98,7 +97,7 @@ private:
     std::uint64_t seq_ = 0;
     std::uint64_t dropped_ = 0;
     std::string error_;
-    std::string compile_messages_;
+    std::string compile_messages_;   // 恒为空（见 compile_messages()）
 };
 
 }  // namespace mc

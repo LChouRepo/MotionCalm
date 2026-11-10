@@ -7,15 +7,22 @@ rem Objects go to %MC_OBJ%\app\<dir>\ (one cl /MP call per source directory, so 
 rem same base name in different directories never collide). The app obj dir is wiped on every
 rem build so deleted sources do not linger.
 rem The manifest is embedded by app.rc (RT_MANIFEST id 1), hence link /MANIFEST:NO.
+rem The HLSL shaders are compiled first by build_shaders.cmd into %MC_OBJ%\shaders\ (extra /I).
 rem Keep this file ASCII-only.
 setlocal EnableExtensions
 rem env.cmd (and vcvars64) run before delayed expansion is switched on.
 call "%~dp0env.cmd"
 if errorlevel 1 exit /b 1
+rem HLSL -> %MC_OBJ%\shaders\*.h (included by src\overlay\renderer.cpp, src\capture\gpu_downscale.cpp).
+call "%~dp0build_shaders.cmd"
+if errorlevel 1 (
+  echo [app] BUILD FAILED
+  exit /b 1
+)
 setlocal EnableDelayedExpansion
 
 set "MC_AOBJ=%MC_OBJ%\app"
-set "MC_AINC=/I"%MC_ROOT%\src""
+set "MC_AINC=/I"%MC_ROOT%\src" /I"%MC_OBJ%\shaders""
 if not exist "%MC_ROOT%\src\app\main.cpp" (
   echo [app] missing %MC_ROOT%\src\app\main.cpp
   goto :failed

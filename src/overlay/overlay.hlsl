@@ -1,11 +1,4 @@
-// shaders.h — overlay 的 HLSL 源码（运行时 D3DCompile，vs_4_0 / ps_4_0）：全屏三角形 VS；遮罩 + 8 个边缘点 + 中心点描边与中心点的 PS，输出预乘 alpha。
-#pragma once
-
-namespace mc::shaders {
-
-// 常量布局必须与 overlay/renderer.h 的 OverlayConstants 一致（7 个 float4）。
-// 合成顺序（design D7）：遮罩 → 边缘点 over → 中心点描边环 over → 中心点 over；over = src + dst·(1 − src.a)。
-inline constexpr char kOverlayHlsl[] = R"hlsl(
+// overlay.hlsl — overlay 着色器（构建时由 scripts\build_shaders.cmd 用 fxc 编译为 vs_4_0 / ps_4_0 字节码头文件）：全屏三角形 VS；遮罩 + 8 个边缘点 + 中心点描边与中心点的 PS，输出预乘 alpha。cbuffer 布局必须与 overlay/renderer.h 的 OverlayConstants 一致。
 cbuffer OverlayConstants : register(b0)
 {
     float4 g_size_radii;   // W, H（像素）, rx, ry（满强度清晰区半径，像素）
@@ -100,6 +93,3 @@ float4 PSMain(VSOut input) : SV_Target
     }
     return col;
 }
-)hlsl";
-
-}  // namespace mc::shaders

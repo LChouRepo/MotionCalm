@@ -18,7 +18,9 @@
 
 namespace mc {
 
-// 着色器常量（与 overlay/shaders.h 的 cbuffer 一一对应：7 个 float4）。所有 px 量都已乘以 DPI / 96。
+// 着色器常量（与 overlay/overlay.hlsl 的 cbuffer OverlayConstants 一一对应：7 个 float4，改一边必须同时改另一边）。
+// 所有 px 量都已乘以 DPI / 96。着色器的合成顺序（design D7）：遮罩 → 边缘点 over → 中心点描边环 over → 中心点 over；
+// over = src + dst·(1 − src.a)。
 struct OverlayConstants {
     float size_radii[4]{};    // W, H, rx, ry
     float mask[4]{};          // R, feather, intensity, max_opacity
@@ -90,7 +92,6 @@ private:
     bool create_swap_chain(HWND hwnd);
     bool create_targets();
     void release_targets();
-    bool compile_shaders();
     bool create_pipeline();
     bool create_text_resources();
     void ensure_text_formats(float scale);
@@ -129,9 +130,6 @@ private:
     ComPtr<ID3D11PixelShader> ps_;
     ComPtr<ID3D11Buffer> cbuffer_;
     ComPtr<ID3D11RasterizerState> raster_;
-
-    // 编译好的着色器字节码（设备重建时复用）
-    ComPtr<ID3DBlob> vs_blob_, ps_blob_;
 
     // D2D / DWrite
     ComPtr<ID2D1Factory1> d2d_factory_;

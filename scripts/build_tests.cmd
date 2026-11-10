@@ -7,16 +7,23 @@ rem            (= number of failed tests).
 rem Objects go to %MC_OBJ%\tests\<dir>\ (one cl /MP call per source directory, so files with
 rem the same base name in different directories never collide). The tests obj dir is wiped
 rem on every build so deleted sources do not linger.
+rem The HLSL shaders are compiled first by build_shaders.cmd into %MC_OBJ%\shaders\ (extra /I).
 rem Keep this file ASCII-only.
 setlocal EnableExtensions
 rem env.cmd (and vcvars64) run before delayed expansion is switched on.
 call "%~dp0env.cmd"
 if errorlevel 1 exit /b 1
+rem HLSL -> %MC_OBJ%\shaders\*.h (included by the renderer, the GPU downscaler and tests\test_overlay.cpp).
+call "%~dp0build_shaders.cmd"
+if errorlevel 1 (
+  echo [tests] BUILD FAILED
+  exit /b 1
+)
 setlocal EnableDelayedExpansion
 
 set "MC_TOBJ=%MC_OBJ%\tests"
 set "MC_EXCLUDE=%MC_ROOT%\src\app\main.cpp"
-set "MC_TINC=/I"%MC_ROOT%\src" /I"%MC_ROOT%\tests""
+set "MC_TINC=/I"%MC_ROOT%\src" /I"%MC_ROOT%\tests" /I"%MC_OBJ%\shaders""
 if exist "%MC_TOBJ%\" rd /s /q "%MC_TOBJ%"
 mkdir "%MC_TOBJ%"
 if errorlevel 1 (
